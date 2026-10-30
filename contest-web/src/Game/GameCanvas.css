@@ -465,3 +465,34 @@
 @media(max-width:600px){.story-location{right:8px!important;bottom:135px!important;max-width:185px!important;padding:7px!important;font-size:10px!important}.chapter-status{top:5px!important;max-width:90%!important;width:max-content;max-width:95%!important;font-size:9px!important}.quest-panel{top:50px!important;left:8px!important;width:170px!important;max-height:120px!important;overflow:auto!important;padding:8px!important}.quest{font-size:10px!important}.game-window{border-radius:0}.battle-hud strong{font-size:12px}.game-action-bar{gap:5px!important;padding:8px!important}.build-actions{gap:5px!important}.build-actions button{font-size:10px!important;padding:8px!important;min-width:65px!important}.game-canvas{height:70vh;min-height:400px}}
 
 .game-action-bar{display:flex;align-items:center;flex-wrap:wrap;gap:10px}.sound-toggle{flex:0 0 65px!important}.combat-actions{flex:0 1 auto}.build-actions{flex:1 1 auto}.game-canvas{height:calc(100dvh - 180px);min-height:360px}.mission-shell{align-items:flex-start}@media(max-width:600px){.game-canvas{height:calc(100dvh - 170px);min-height:360px}.build-actions{overflow-x:auto;flex-wrap:nowrap!important}.build-actions>span{display:none}.game-action-bar{flex-wrap:nowrap!important}.sound-toggle{flex-basis:50px!important;min-width:50px!important}}@media(max-height:500px){.mission-shell .battle-hud{display:none}.game-canvas{height:calc(100dvh - 85px);min-height:260px}.quest-panel{max-height:100px!important;overflow:auto}.fps-instructions{display:none}}
+/* Immersive visor: the world fills the screen; management is opt-in. */
+.immersive-hud{position:fixed;inset:0;max-width:none;background:#080f14;isolation:isolate}
+.immersive-hud .game-window{position:absolute;inset:0;border:0;border-radius:0;box-shadow:none}
+.immersive-hud .game-canvas{height:100dvh;width:100%;min-height:0}
+.immersive-hud .battle-hud{position:absolute;top:20px;left:50%;transform:translateX(-50%);width:min(320px,45vw);z-index:20;background:transparent;border:0;padding:0;display:block;pointer-events:none}
+.immersive-hud .battle-hud>div:not(.player-bars){display:none}
+.immersive-hud .player-bars{max-width:none;width:100%;display:block}
+.immersive-hud .player-bars label{display:none}
+.immersive-hud .stat-bar{height:4px;background:#16354399;margin-bottom:5px;border-radius:0}
+.immersive-hud .shield-bar{background:#8edbfa;box-shadow:0 0 12px #5ec6ff}
+.immersive-hud .health-bar{background:#d1e8da}
+.immersive-hud .chapter-status{left:24px!important;top:28px!important;transform:none!important;background:none!important;border:0!important;padding:0!important;max-width:34%!important;font-size:10px!important;letter-spacing:.07em;line-height:1.5!important}
+.immersive-hud .mission-banner{display:none}
+.immersive-hud .story-location{left:24px!important;right:auto!important;top:65px!important;bottom:auto!important;background:transparent!important;border:0!important;padding:0!important;max-width:270px!important;font-size:10px!important}
+.immersive-hud .story-location>div:first-child,.immersive-hud .story-location>div:last-child{display:none}
+.immersive-hud .squad-radar{top:auto!important;bottom:24px!important;left:24px!important;width:125px!important;padding:5px!important;background:#07151d77!important;border:1px solid #77b6c533!important;border-radius:50%!important;overflow:hidden;pointer-events:none}
+.immersive-hud .squad-radar>div,.immersive-hud .squad-radar>small{display:none!important}
+.immersive-hud .squad-radar svg{height:100px!important;width:100%!important}
+.immersive-hud .game-action-bar{position:absolute;right:20px;bottom:20px;z-index:25;background:transparent;border:0;padding:0;margin:0;gap:7px;justify-content:flex-end;max-width:70%;flex-wrap:wrap!important}
+.immersive-hud .game-action-bar button{min-height:36px;padding:8px 12px;background:#06131ccc;border:1px solid #8ab4c544;border-radius:2px;font-size:10px;letter-spacing:.08em}
+.immersive-hud .combat-actions{display:none}
+.immersive-hud .build-actions{flex-basis:100%;padding:12px;background:#07131eeb;border:1px solid #80b4cb44}
+.immersive-hud .build-actions>span{display:none}
+.immersive-hud .fps-instructions{bottom:22px;background:none;border:0;font-size:9px!important;opacity:.65}
+.immersive-hud .fps-instructions--locked,.immersive-hud .fps-instructions--fallback{display:none}
+.immersive-hud .journal-toggle{position:absolute;right:24px;top:23px;z-index:25;background:#07131b99;color:#d8edf2;border:1px solid #8ab4c544;padding:8px 11px;font-size:10px;letter-spacing:.08em}
+.immersive-hud .quest-panel{top:70px!important;left:auto!important;right:24px;width:300px!important;max-height:60vh!important;background:#06131eef!important}
+.immersive-hud .game-window>button:not(.journal-toggle){top:60px!important;right:24px!important;font-size:9px!important;padding:5px 8px!important;background:#07131b99!important;border-color:#8ab4c533!important}
+.immersive-hud .world-prompt{bottom:76px;font-size:10px;padding:7px 12px;background:#06131caa;border:0}
+@media(pointer:coarse){.immersive-hud .squad-radar{bottom:170px!important;left:15px!important;width:85px!important}.immersive-hud .squad-radar svg{height:65px!important}.immersive-hud .game-action-bar{bottom:10px;right:10px}.immersive-hud .story-location{top:64px!important;left:15px!important;max-width:180px!important}.immersive-hud .chapter-status{top:24px!important;left:15px!important;max-width:32%!important;font-size:8px!important}.immersive-hud .journal-toggle{right:12px;top:20px;font-size:8px}.immersive-hud .game-window>button:not(.journal-toggle){right:12px!important;top:54px!important}.immersive-hud .quest-panel{right:12px;top:90px!important;width:min(280px,85vw)!important}.immersive-hud .build-actions{max-width:85vw;overflow:auto}.immersive-hud .battle-hud{top:22px;width:30vw}.immersive-hud .world-prompt{bottom:122px;max-width:50%;left:50%;transform:translateX(-50%)}}
+@media(pointer:coarse){.immersive-hud .touch-move,.immersive-hud .touch-actions{bottom:70px}.immersive-hud .game-action-bar{max-width:90%}.immersive-hud .sound-toggle{display:none}}

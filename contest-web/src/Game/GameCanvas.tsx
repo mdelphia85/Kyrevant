@@ -41,6 +41,7 @@ import '@babylonjs/loaders/glTF'
 import type { Socket } from 'socket.io-client'
 import './GameCanvas.css'
 import Arrival from './Arrival'
+import { buildWildFrontier } from './WildFrontier'
 import TouchControls from './TouchControls'
 import { CombatAudio } from './CombatAudio'
 // Self-contained Babylon scene visuals; no Visuals.ts dependency.
@@ -156,9 +157,9 @@ function createAtmosphere(scene: Scene) {
     void main() {
       vec3 d=normalize(vDirection);
       float up=clamp(d.y*0.5+0.5,0.0,1.0);
-      vec3 zenith=vec3(0.009,0.020,0.044);
-      vec3 upper=vec3(0.047,0.096,0.151);
-      vec3 horizon=vec3(0.215,0.164,0.163);
+      vec3 zenith=vec3(0.045,0.12,0.22);
+      vec3 upper=vec3(0.16,0.30,0.39);
+      vec3 horizon=vec3(0.48,0.43,0.33);
       vec3 bottom=vec3(0.084,0.077,0.086);
       vec3 col=mix(bottom,horizon,smoothstep(0.08,0.52,up));
       col=mix(col,upper,smoothstep(0.49,0.75,up));
@@ -387,8 +388,8 @@ function createArmoredSoldier(scene: Scene, role: Role, id: string): TransformNo
 function createWeaponView(scene: Scene, camera: FreeCamera) {
   const root = new TransformNode('fps-rifle-viewmodel', scene)
   root.parent = camera
-  root.position.set(.31,-.37,.72)
-  root.scaling.setAll(.74)
+  root.position.set(.25,-.29,.72)
+  root.scaling.setAll(.48)
   root.rotation.y = -.06
   const gun = metal(scene,'fps-gun-body','#263443')
   const edge = metal(scene,'fps-gun-edge','#637385')
@@ -598,14 +599,26 @@ function createFrontierChapterWorld(scene: Scene) {
   for(let i=0;i<7;i++){
     const f=MeshBuilder.CreateSphere(`crash-fire-${i}`,{diameter:.35+(i%3)*.25,segments:9},scene)
     f.parent=root;f.position.set(9.8+i*.55,.4+(i%3)*.32,25.3+(i%2)*.6)
-    f.material=threat;f.scaling.set(.4,1.8,.4);fire.push(f)
+    f.material=threat;f.scaling.set(.4,1.8,.4);f.visibility=0;fire.push(f)
   }
   const sootCloud=[] as ReturnType<typeof MeshBuilder.CreateSphere>[]
   for(let i=0;i<9;i++){
     const f=MeshBuilder.CreateSphere(`crash-smoke-${i}`,{diameter:1.3+(i%4)*.52,segments:9},scene)
     f.parent=root;f.position.set(10.4+Math.sin(i)*1.6,2+i*.91,25.2+Math.cos(i)*.6)
-    f.material=smoke;f.visibility=.38;sootCloud.push(f)
+    f.material=smoke;f.visibility=0;sootCloud.push(f)
   }
+  const plumeTexture=new DynamicTexture('soft-impact-plume',{width:64,height:64},scene,false)
+  const plumeCtx=plumeTexture.getContext()
+  const plumeGradient=plumeCtx.createRadialGradient(32,32,0,32,32,32)
+  plumeGradient.addColorStop(0,'rgba(255,255,255,.6)');plumeGradient.addColorStop(.35,'rgba(255,255,255,.28)');plumeGradient.addColorStop(1,'rgba(255,255,255,0)')
+  plumeCtx.fillStyle=plumeGradient;plumeCtx.fillRect(0,0,64,64);plumeTexture.hasAlpha=true;plumeTexture.update()
+  const plume=new ParticleSystem('wreck-smoke',100,scene)
+  plume.particleTexture=plumeTexture;plume.emitter=new Vector3(14,.7,27)
+  plume.minEmitBox=new Vector3(-1,0,-.4);plume.maxEmitBox=new Vector3(1,0,.4)
+  plume.color1=new Color4(.12,.13,.14,.35);plume.color2=new Color4(.22,.23,.23,.2);plume.colorDead=new Color4(.2,.22,.24,0)
+  plume.minSize=.5;plume.maxSize=2;plume.minLifeTime=3;plume.maxLifeTime=5
+  plume.emitRate=14;plume.direction1=new Vector3(.1,.8,0);plume.direction2=new Vector3(.5,1.2,.1)
+  plume.minEmitPower=.6;plume.maxEmitPower=1;plume.blendMode=ParticleSystem.BLENDMODE_STANDARD;plume.start()
   // SETTLEMENT: broad roads, market light and approach barricades. The inn OBJ
   // is at 23,12; its dialogue anchor stays at the server's 23,12 coordinates.
   for(let i=0;i<8;i++){
@@ -665,7 +678,7 @@ function createFrontierChapterWorld(scene: Scene) {
     for(let i=0;i<fire.length;i++)fire[i].position.y=.6+Math.abs(Math.sin(time*5+i))*.35
     for(let i=0;i<sootCloud.length;i++){
       sootCloud[i].position.y=2+i*.91+(time*.25)%2.1
-      sootCloud[i].visibility=.24+.14*Math.sin(time*.8+i)
+      sootCloud[i].visibility=0
     }
     if(rescued){
       prisonGate.position.y=Math.max(-1.65,prisonGate.position.y-dt*1.2)
@@ -922,6 +935,7 @@ function GameCanvas({
   useEffect(() => { if(soundRef.current) soundRef.current.enabled=soundEnabled },[soundEnabled])
   const [hitAt, setHitAt] = useState(0)
   const [showArrival, setShowArrival] = useState(true)
+  const [showBuildMenu, setShowBuildMenu] = useState(false)
   const combatPaused = useRef(true)
   const [showFullQuestLog, setShowFullQuestLog] = useState(false)
   const [dialogue, setDialogue] = useState<GameDialogue | null>(null)
@@ -991,7 +1005,7 @@ function GameCanvas({
     scene.fogMode =
       Scene.FOGMODE_EXP2
     scene.fogDensity =
-      0.0048
+      0.0032
     scene.fogColor =
       new Color3(
         0.083,
@@ -1235,6 +1249,7 @@ const glow =
     const sky=createAtmosphere(scene)
     sky.position.copyFrom(new Vector3(25,0,16))
     levelVisuals.push(buildFarLandscape(scene))
+    levelVisuals.push(buildWildFrontier(scene))
 
     // Floating atmospheric dust, barely visible until backlit by the sunset.
     // Independent of combat/physics and harmless to multiplayer synchronization.
@@ -1313,11 +1328,11 @@ const glow =
     )
     fpsCamera.minZ = 0.055
     fpsCamera.maxZ = 250
-    fpsCamera.fov = 1.1
+    fpsCamera.fov = 1.18
     // Face toward the playable settlement, with the ground in view.
     // Starting with a level horizon and looking toward the map edge
     // made combat mode appear to show only a blue/empty background.
-    fpsCamera.setTarget(new Vector3(14.8, 1.15, 26.8))
+    fpsCamera.setTarget(new Vector3(10, 1.5, 22))
     scene.activeCamera = fpsCamera
     const { root: fpsWeapon, flash: fpsFlash } = createWeaponView(scene, fpsCamera)
     // Production-style antialiasing / tonemapping pipeline. The FPS and
@@ -1333,7 +1348,7 @@ const glow =
     renderPipeline.bloomKernel = 36
     renderPipeline.imageProcessingEnabled = true
     renderPipeline.imageProcessing.contrast = 1.10
-    renderPipeline.imageProcessing.exposure = 0.82
+    renderPipeline.imageProcessing.exposure = 1.08
 
     let weaponKick = 0
     let flashTime = 0
@@ -1913,8 +1928,8 @@ const glow =
       for(const [file,x,z,scale,rot,district] of placements) {
         try {
           const imported=await importAsset(ENVIRONMENT_ROOT,file,new Vector3(x,0,z),scale,rot)
-          const color = district==='civilian' ? new Color3(.58,.48,.38)
-            : district==='resistance' ? new Color3(.32,.52,.56)
+          const color = district==='civilian' ? new Color3(.30,.32,.29)
+            : district==='resistance' ? new Color3(.23,.30,.31)
             : district==='occupation' ? new Color3(.39,.27,.29)
             : new Color3(.36,.34,.32)
           const surface=material(`district-${file}-${x}-${z}`,color)
@@ -2309,6 +2324,7 @@ const glow =
       beacon.position.y = 3.0
       beacon.material = signal
       beacon.isPickable = false
+      beacon.setEnabled(false)
       const beaconHead = MeshBuilder.CreateSphere(
         `${node.id}-location-beacon-head`,
         { diameter: 0.3, segments: 12 },
@@ -2318,6 +2334,7 @@ const glow =
       beaconHead.position.y = 4.75
       beaconHead.material = signal
       beaconHead.isPickable = false
+      beaconHead.setEnabled(false)
       root.setEnabled(true)
       resourceVisuals.set(node.id,root)
     }
@@ -3435,7 +3452,7 @@ const glow =
         }
         weaponKick=Math.max(0,weaponKick-engine.getDeltaTime()*.00075)
         fpsWeapon.position.z=.72-weaponKick
-        fpsWeapon.position.y=-.37+Math.sin(performance.now()*.004)*.006
+        fpsWeapon.position.y=-.29+Math.sin(performance.now()*.004)*.006
         if(flashTime>0 && performance.now()>flashTime){ fpsFlash.setEnabled(false);flashTime=0 }
         const local =
           currentPlayers.find(
@@ -3781,7 +3798,7 @@ const glow =
     : Infinity
 
   return (
-    <div className="kyrevant-game">
+    <div className={`kyrevant-game immersive-hud ${commandMode ? "is-command" : ""}`}>
       {showArrival && <Arrival onComplete={() => setShowArrival(false)} />}
 
  
@@ -3885,7 +3902,7 @@ const glow =
             font: 'bold 13px Arial, sans-serif', pointerEvents: 'none',
           }}>DOWNED · TEAMMATE HEAL OR SQUAD REDEPLOY</div>
         )}
-        {!commandMode && <div aria-label="Tactical co-op radar" style={{
+        {!commandMode && <div className="squad-radar" aria-label="Tactical co-op radar" style={{
           position:'absolute',bottom:86,left:16,zIndex:11,width:207,padding:'8px 10px',
           background:'rgba(4,15,26,.88)',border:'1px solid rgba(105,191,215,.57)',
           borderRadius:7,color:'#bfeeff',pointerEvents:'none',
@@ -3995,7 +4012,8 @@ const glow =
               }}>{choice.label}</button>)}
           </div>
         </div>}
-<aside className="quest-panel" style={{
+<button className="journal-toggle" onClick={() => setShowFullQuestLog(value => !value)} aria-expanded={showFullQuestLog}>MISSION LOG</button>
+{showFullQuestLog && <aside className="quest-panel" style={{
           maxHeight: showFullQuestLog ? '46vh' : '174px',
           overflowY: 'auto', maxWidth: '300px',
         }}>
@@ -4029,7 +4047,7 @@ const glow =
               </div>
             ),
           )}
-        </aside>
+        </aside>}
         {miningActive && (
           <div className="mining-progress-panel" aria-label="Mining progress">
             <div className="mining-progress-heading">
@@ -4052,7 +4070,7 @@ const glow =
             <small>+20 PER EXTRACTION · UNLIMITED · PRESS M TO STOP</small>
           </div>
         )}
-        {!commandMode && (miningFeedback || nearbyResource || nearestMiningTarget) && (
+        {!commandMode && (miningFeedback || nearbyResource) && (
           <div className="world-prompt" role="status" aria-live="polite">
             {miningFeedback || (nearbyResource
               ? miningActive
@@ -4142,7 +4160,8 @@ const glow =
             {miningActive ? 'STOP MINING' : 'MINE'}
           </button>
         </div>
-        <div className="build-actions">
+        <button className="construction-toggle" aria-expanded={showBuildMenu} onClick={() => setShowBuildMenu(value => !value)}>{showBuildMenu ? "CLOSE BUILD" : "BUILD BASE"}</button>
+        {showBuildMenu && <div className="build-actions">
           <span>
             BASE CONSTRUCTION
           </span>
@@ -4198,7 +4217,7 @@ const glow =
               80M / 60E
             </small>
           </button>
-        </div>
+        </div>}
       </section>
     </div>
   )

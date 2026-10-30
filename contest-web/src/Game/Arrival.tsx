@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import './Arrival.css'
+import TransportSequence from './TransportSequence'
 
 const scenes = [
   { label: 'UNIT TRANSPORT / DEEP SPACE', title: 'One last routine passage.', text: 'Your unit is asleep when the proximity alarm sounds. Something massive has entered the flight path.' },
@@ -16,9 +17,7 @@ export default function Arrival({ onComplete }: { onComplete: () => void }) {
   }, [scene])
   const current = scenes[scene]
   return <section className={`arrival arrival-${scene}`} role="dialog" aria-modal="true" aria-label="The fall of your transport">
-    <div className="arrival-stars" aria-hidden="true" />
-    <div className="arrival-planet" aria-hidden="true" />
-    <div className="arrival-ship" aria-hidden="true" />
+    <TransportSequence stage={scene} />
     <div className="arrival-copy" key={scene}>
       <p className="arrival-label">{current.label}</p>
       <h1>{current.title}</h1>
