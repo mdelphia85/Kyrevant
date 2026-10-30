@@ -1,0 +1,41 @@
+{
+  "name": "kyrevant-multiplayer-game",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:client\" \"npm run dev:server\"",
+    "dev:client": "vite",
+    "dev:server": "tsx watch server/server.ts",
+    "build": "tsc -b && tsc -p tsconfig.server.json && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview",
+    "start": "tsx server/server.ts",
+    "test": "node scripts/test-local.mjs",
+    "test:campaign": "node scripts/test-local.mjs --campaign"
+  },
+  "dependencies": {
+    "@babylonjs/core": "^9.29.0",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "phaser": "^4.2.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "socket.io": "^4.8.4",
+    "socket.io-client": "^4.8.4",
+    "@babylonjs/loaders": "9.29.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.19.1",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "concurrently": "^10.0.5",
+    "oxlint": "^1.81.0",
+    "tsx": "^4.23.15",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0"
+  }
+}

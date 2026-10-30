@@ -1,0 +1,465 @@
+.kyrevant-game {
+  width: 100%;
+  max-width: 1580px;
+  margin: 0 auto;
+}
+
+.battle-hud {
+  display: grid;
+  grid-template-columns:
+    auto auto auto auto 1fr;
+  gap: 18px;
+  align-items: center;
+  margin-bottom: 10px;
+  padding: 12px 16px;
+  border: 1px solid #263a52;
+  border-radius: 12px;
+  background: #060b12;
+}
+
+.battle-hud > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.battle-hud span,
+.player-bars label {
+  color: #7797c3;
+  font-size: 0.65rem;
+  font-weight: 900;
+  letter-spacing: 0.12rem;
+}
+
+.battle-hud strong {
+  color: #f0f5fc;
+  font-size: 1rem;
+}
+
+.player-bars {
+  width: 100%;
+  max-width: 400px;
+  justify-self: end;
+}
+
+.stat-bar {
+  width: 100%;
+  height: 7px;
+  overflow: hidden;
+  border-radius: 100px;
+  background: #121923;
+}
+
+.shield-bar {
+  height: 100%;
+  background:
+    linear-gradient(
+      90deg,
+      #315fd2,
+      #55b8ff
+    );
+}
+
+.health-bar {
+  height: 100%;
+  background:
+    linear-gradient(
+      90deg,
+      #9c2933,
+      #ee5961
+    );
+}
+
+.game-window {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid #293f5a;
+  border-radius: 15px;
+  background: #03070c;
+}
+
+.game-canvas {
+  display: block;
+  width: 100%;
+  height: min(74vh, 900px);
+  min-height: 460px;
+  outline: none;
+  touch-action: none;
+}
+
+.crosshair {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 30px;
+  height: 30px;
+  transform: translate(
+    -50%,
+    -50%
+  );
+  pointer-events: none;
+}
+
+.crosshair span:first-child {
+  position: absolute;
+  top: 14px;
+  left: 3px;
+  width: 24px;
+  height: 2px;
+  background: rgba(
+    255,
+    255,
+    255,
+    0.9
+  );
+}
+
+.crosshair span:last-child {
+  position: absolute;
+  top: 3px;
+  left: 14px;
+  width: 2px;
+  height: 24px;
+  background: rgba(
+    255,
+    255,
+    255,
+    0.9
+  );
+}
+
+.mission-banner {
+  position: absolute;
+  top: 15px;
+  left: 50%;
+  max-width: 650px;
+  transform: translateX(
+    -50%
+  );
+  padding: 9px 16px;
+  border: 1px solid
+    rgba(
+      108,
+      151,
+      208,
+      0.3
+    );
+  border-radius: 8px;
+  background: rgba(
+    2,
+    7,
+    13,
+    0.84
+  );
+  color: #d8e5f5;
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-align: center;
+  pointer-events: none;
+}
+
+.quest-panel {
+  position: absolute;
+  top: 60px;
+  left: 15px;
+  width: min(
+    320px,
+    calc(100% - 30px)
+  );
+  padding: 13px;
+  border: 1px solid
+    rgba(
+      115,
+      145,
+      184,
+      0.22
+    );
+  border-radius: 9px;
+  background: rgba(
+    3,
+    8,
+    14,
+    0.8
+  );
+  pointer-events: none;
+}
+
+.quest-panel h3 {
+  margin: 0 0 10px;
+  color: #8fb6ec;
+  font-size: 0.68rem;
+  letter-spacing: 0.12rem;
+}
+
+.quest {
+  display: flex;
+  gap: 7px;
+  margin: 6px 0;
+  color: #c0cad7;
+  font-size: 0.72rem;
+}
+
+.quest p {
+  margin: 0;
+}
+
+.quest.complete {
+  color: #63d89a;
+  text-decoration: line-through;
+  opacity: 0.72;
+}
+
+.world-prompt {
+  position: absolute;
+  bottom: 25px;
+  left: 50%;
+  transform: translateX(
+    -50%
+  );
+  padding: 11px 20px;
+  border: 1px solid #477eb8;
+  border-radius: 7px;
+  background: rgba(
+    4,
+    11,
+    19,
+    0.92
+  );
+  color: white;
+  font-weight: 900;
+  letter-spacing: 0.08rem;
+  pointer-events: none;
+}
+
+.build-mode-label {
+  position: absolute;
+  right: 16px;
+  top: 70px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 16px;
+  border: 1px solid #6e60bd;
+  border-radius: 8px;
+  background: rgba(
+    12,
+    7,
+    24,
+    0.9
+  );
+  color: #c7bdf8;
+  font-size: 0.8rem;
+  font-weight: 900;
+  letter-spacing: 0.1rem;
+  pointer-events: none;
+}
+
+.build-mode-label small {
+  color: #a59bc5;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: normal;
+}
+
+.game-action-bar {
+  display: grid;
+  grid-template-columns:
+    auto 1fr;
+  gap: 15px;
+  margin-top: 10px;
+  padding: 11px;
+  border: 1px solid #27394f;
+  border-radius: 12px;
+  background: #060b12;
+}
+
+.combat-actions,
+.build-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.build-actions {
+  justify-content: flex-end;
+}
+
+.build-actions > span {
+  margin-right: 5px;
+  color: #7789a1;
+  font-size: 0.65rem;
+  font-weight: 900;
+  letter-spacing: 0.1rem;
+}
+
+.game-action-bar button {
+  min-height: 46px;
+  padding: 7px 14px;
+  border: 1px solid #3b4d65;
+  border-radius: 8px;
+  background: #111b28;
+  color: white;
+  font-weight: 850;
+  cursor: pointer;
+}
+
+.game-action-bar button:hover:not(
+    :disabled
+  ) {
+  background: #19283a;
+}
+
+.game-action-bar button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.game-action-bar button small {
+  display: block;
+  margin-top: 2px;
+  color: #8291a6;
+  font-size: 0.62rem;
+}
+
+.victory-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(
+      circle,
+      rgba(
+        42,
+        94,
+        78,
+        0.35
+      ),
+      rgba(
+        1,
+        4,
+        8,
+        0.96
+      )
+    );
+  text-align: center;
+}
+
+.victory-overlay span {
+  color: #78a6e8;
+  font-weight: 900;
+  letter-spacing: 0.25rem;
+}
+
+.victory-overlay h1 {
+  margin: 10px 0;
+  font-size: clamp(
+    2.3rem,
+    7vw,
+    4.5rem
+  );
+}
+
+.victory-overlay p {
+  color: #a9b6c8;
+}
+
+.victory-overlay strong {
+  margin-top: 15px;
+  color: #70dfa7;
+  font-size: 1.4rem;
+  letter-spacing: 0.18rem;
+}
+
+@media (
+  max-width: 900px
+) {
+  .battle-hud {
+    grid-template-columns:
+      repeat(4, 1fr);
+  }
+
+  .player-bars {
+    grid-column:
+      1 / -1;
+    max-width: none;
+  }
+
+  .game-action-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .build-actions {
+    justify-content:
+      flex-start;
+  }
+}
+/* First-person control prompt: remains readable without obscuring the reticle. */
+.fps-instructions {
+  position: absolute;
+  z-index: 4;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 90%;
+  padding: 8px 12px;
+  border: 1px solid rgba(97, 173, 225, .25);
+  border-radius: 5px;
+  color: #c5d7e9;
+  background: rgba(5, 12, 19, .78);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* Combat presentation: main game is the focal point instead of a small boxed demo. */
+.game-window { box-shadow: 0 22px 65px rgba(0,0,0,.55), inset 0 0 55px rgba(0,0,0,.35); }
+.battle-hud { background: rgba(8,15,24,.94); border-color: #344a5b; }
+.mission-banner { letter-spacing: .16em; text-transform: uppercase; }
+.quest-panel { background: rgba(5,12,19,.72); backdrop-filter: blur(6px); }
+.game-action-bar { background: rgba(7,14,23,.94); }
+@media(max-width: 800px) {
+  .game-canvas { height: 65vh; min-height: 370px; }
+  .quest-panel { width: min(260px, 52%); font-size: .65rem; }
+  .mission-banner { max-width: 55%; font-size: .63rem; }
+}
+
+/* Mouse control state: visible confirmation that the game captured input. */
+.fps-instructions--locked {
+  color: #a9f0d0;
+  border-color: rgba(90, 214, 156, 0.5);
+  background: rgba(7, 29, 25, 0.83);
+}
+.fps-instructions--fallback {
+  color: #ffe2a7;
+  border-color: rgba(231, 180, 100, 0.48);
+  background: rgba(33, 22, 11, 0.86);
+}
+
+.fps-instructions--released {
+  color: #d2dbf0;
+  border-color: rgba(140, 164, 206, .45);
+  background: rgba(12, 20, 32, .85);
+}
+
+/* CHAPTER 1 HUD: leave the viewport mostly unobstructed. */
+.world-build-id { display:none!important; }
+.quest-panel { width:min(260px,calc(100% - 30px)); background:rgba(3,8,14,.76); }
+.quest-panel .quest {font-size:.68rem}
+@media(max-width:700px){.quest-panel {max-height:110px; width:195px; padding:7px;}
+  .mission-banner{top:9px;font-size:.6rem;padding:5px 8px}
+  .battle-hud{gap:6px;padding:8px}}
+
+.combat-hit-marker{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);color:#fff0c9;font:38px monospace;z-index:15;pointer-events:none;animation:hit-confirm .22s forwards}@keyframes hit-confirm{0%{opacity:1;transform:translate(-50%,-50%) scale(1.2)}100%{opacity:0;transform:translate(-50%,-50%) scale(.8)}}
+
+.battle-hud{grid-template-columns:auto auto auto auto auto 1fr}.battle-hud .world-build-id{font-size:9px;letter-spacing:.12em;color:#d1b57e}.fps-instructions{font-size:10px!important;opacity:.7}.victory-overlay{padding:30px;text-align:center}.victory-overlay p{max-width:560px;color:#c4d7e3;line-height:1.7}.victory-overlay button{margin:8px;padding:13px 20px;border:1px solid #83a6b4;background:#1c3e4b;color:#fff;border-radius:6px}.game-canvas{height:min(76vh,900px)}@media(pointer:coarse){.fps-instructions{display:none!important}.game-canvas{height:70vh;min-height:360px}.quest-panel{max-width:210px!important}.battle-hud{gap:7px;padding:8px;grid-template-columns:repeat(5,1fr)}.battle-hud .world-build-id{display:none}.player-bars{grid-column:1/-1;max-width:none}.game-action-bar{flex-wrap:wrap}.combat-actions{display:none!important}}@media(max-width:700px){.battle-hud{gap:8px}.battle-hud .world-build-id{display:none}.battle-hud{grid-template-columns:repeat(4,auto) 1fr}}
+
+.sound-toggle{font-size:9px!important;padding:7px!important;min-width:65px;color:#a1bdc7!important}
+
+@media(max-width:600px){.story-location{right:8px!important;bottom:135px!important;max-width:185px!important;padding:7px!important;font-size:10px!important}.chapter-status{top:5px!important;max-width:90%!important;width:max-content;max-width:95%!important;font-size:9px!important}.quest-panel{top:50px!important;left:8px!important;width:170px!important;max-height:120px!important;overflow:auto!important;padding:8px!important}.quest{font-size:10px!important}.game-window{border-radius:0}.battle-hud strong{font-size:12px}.game-action-bar{gap:5px!important;padding:8px!important}.build-actions{gap:5px!important}.build-actions button{font-size:10px!important;padding:8px!important;min-width:65px!important}.game-canvas{height:70vh;min-height:400px}}
