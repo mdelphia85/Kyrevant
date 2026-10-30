@@ -44,6 +44,8 @@ type Player = {
   weaponTier?: number
   species?: Species
   lastDamagedAt?: number
+  dialogueUntil?: number
+  dialogueSite?: ChapterSite
 }
 type Enemy = {
   id: string
@@ -274,12 +276,14 @@ function assignSpawnPoints(
       player.facingX = 1
       player.facingY = 0
       const lineage = species.find(option => option.name === player.species) ?? species[0]
-      player.maxHealth = lineage.health
-      player.maxShield = lineage.shield
+      player.maxHealth = lineage.health + ((player.rank ?? 1)-1)*12
+      player.maxShield = lineage.shield + ((player.rank ?? 1)-1)*8
       player.health = player.maxHealth
       player.shield = player.maxShield
       player.downed = false
       player.downedAt = undefined
+      player.dialogueUntil = 0
+      player.dialogueSite = undefined
     },
   )
 }
@@ -1010,6 +1014,10 @@ type ChapterSite = keyof typeof chapterOneSites
 type DialogueOption = { id: string; label: string }
 function notifyPlayer(player: Player, site: ChapterSite, speaker: string,
                       title: string, lines: string[], choices: DialogueOption[]) {
+  if (['flightLog','innkeeper','resistance'].includes(site)) {
+    player.dialogueSite = site
+    player.dialogueUntil = Date.now() + 60000
+  }
   io.to(player.id).emit('kyrevant-dialogue', { site, speaker, title, lines, choices })
 }
 function awardXp(player: Player, amount: number) {
@@ -1189,7 +1197,7 @@ function handleChapterChoice(room: Room, player: Player,
   const here = findStorySite(player)
   if (!here || input.site !== here) return
   const f = room.questFlags
-  if (input.choice === 'leave') return
+  if (input.choice === 'leave') { player.dialogueUntil = 0; return }
   if (input.choice === 'ask_history' && (here === 'innkeeper' || here === 'resistance')) {
     notifyPlayer(player,here,'FRONTIER RECORDS','A PLANET UNDER OCCUPATION',[
       'The planet was settled quietly until an unauthorized military faction seized its technology and communications.',
@@ -1287,10 +1295,16 @@ function emitChapterSummary(room: Room) {
   room.chapterDigest=digest
   io.to(room.code).emit('kyrevant-chapter-state',summary)
 }
+function dialogueProtected(player: Player) {
+  if (!player.dialogueSite || Date.now() >= (player.dialogueUntil ?? 0)) return false
+  const shelter = chapterOneSites[player.dialogueSite]
+  return distance(player.x,player.y,shelter.x,shelter.y) <= shelter.radius
+}
 function damagePlayer(
   player: Player,
   amount: number,
 ) {
+  if (dialogueProtected(player)) return
   player.lastDamagedAt = Date.now()
   let remaining =
     amount
@@ -1772,6 +1786,7 @@ io.on(
         ) {
           return
         }
+        player.dialogueUntil = 0
         const profile =
           attackProfile(
             player.characterClass,
@@ -2637,6 +2652,7 @@ setInterval(() => {
                   'Heavy'
                 ? 20
                 : 13
+          if (dialogueProtected(target)) return
           damagePlayer(
             target,
             damage,
@@ -2737,7 +2753,7 @@ setInterval(() => {
   )
 }, 300)
 const distDirectory = path.resolve(process.cwd(), 'dist')
-app.get('/healthz', (_req, res) => res.status(200).json({ ok: true, game: 'KYREVANT', multiplayer: true }))
+app.get('/healthz', (_req, res) => res.status(200).json({ ok: true, game: 'KYREVANT', multiplayer: true, build: '2026-10-30.2' }))
 if (existsSync(path.join(distDirectory, 'index.html'))) {
   app.use(express.static(distDirectory, { maxAge: 3600000 }))
   app.get('/', (_req, res) => res.sendFile(path.join(distDirectory, 'index.html')))

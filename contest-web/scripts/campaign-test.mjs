@@ -17,12 +17,22 @@ host.on('game-won',()=>{won=true})
 const done=id=>state.quests.some(q=>q.id===id&&q.complete)
 const player=socket=>state.players.find(p=>p.id===socket.id)
 async function until(test,label,ms=20000){const start=Date.now();while(!test()){if(Date.now()-start>ms)throw new Error(`${label}: ${JSON.stringify({level:state.level,quests:state.quests,players:state.players.map(p=>({name:p.name,x:p.x,y:p.y,hp:p.health,down:p.downed}))})}`);await sleep(50)}}
+async function synchronize(){const response=once(host,'session-state');host.emit('request-room-state');state=await response}
 async function travel(x,y){
   const start=Date.now()
   while(Math.hypot(player(host).x-x,player(host).y-y)>65){
-    if(Date.now()-start>35000)throw new Error(`Travel timeout ${x},${y}`)
-    for(const socket of [host,guest]){const p=player(socket);if(!p||p.downed)continue;const dx=x-p.x,dy=y-p.y,m=Math.hypot(dx,dy);if(m>40)socket.emit('move-player',{roomCode:code,dx:dx/m,dy:dy/m})}
-    await sleep(42)
+    if(Date.now()-start>60000)throw new Error(`Travel timeout ${x},${y}`)
+    const p=player(host)
+    if(p.downed){await sleep(500);await synchronize();continue}
+    const distance=Math.hypot(p.x-x,p.y-y)
+    const steps=Math.min(8,Math.max(1,Math.floor((distance-40)/14)))
+    for(let step=0;step<steps;step++){
+      for(const socket of [host,guest]){const ally=player(socket);if(!ally||ally.downed)continue;const dx=x-ally.x,dy=y-ally.y,m=Math.hypot(dx,dy);if(m>40)socket.emit('move-player',{roomCode:code,dx:dx/m,dy:dy/m})}
+      await sleep(42)
+    }
+    // Drain the host's ordered input stream before using its position. This
+    // avoids overshooting interactables when public-network updates are delayed.
+    await synchronize()
   }
 }
 async function talk(x,y,site,choice,id){await travel(x,y);host.emit('interact',code);await sleep(100);host.emit('kyrevant-dialogue-choice',{roomCode:code,site,choice});await until(()=>done(id),`Dialogue ${id}`)}
@@ -60,6 +70,12 @@ try{
   await sleep(150);assert.equal(player(host).x,original)
   const restored=once(guest,'connect');const id=guest.id;guest.io.engine.close();await restored;assert.equal(guest.id,id)
   console.log('PASS: lineage bonuses, malformed-input rejection, transport reconnect')
+  await travel(600,1100)
+  const conversation=once(host,'kyrevant-dialogue');host.emit('interact',code);await conversation;await synchronize()
+  const protectedHealth=player(host).health+player(host).shield
+  await sleep(2600);await synchronize()
+  assert.ok(player(host).health+player(host).shield>=protectedHealth,'Reading a friendly note must protect the reader')
+  console.log('PASS: friendly story dialogue protects readers under fire')
   await talk(500,1100,'flightLog','download','recover-flight-log')
   await fight(e=>e.id==='l1-raider-1'||e.id==='l1-raider-2')
   await talk(1150,600,'innkeeper','ask_missing','meet-innkeeper')
@@ -77,10 +93,12 @@ try{
   console.log('PASS: crash, note, rescue, mining, construction, settlement defense, chapter transition')
   await mine('minerals',250);await mine('energy',120)
   await build('Barracks',850,1250);await build('PowerCore',1050,1250)
+  await fight();console.log('PASS: frontier approach secured')
   await travel(1850,320);host.emit('interact',code);await until(()=>done('recover-artifact'),'Recover artifact')
   await fight(e=>e.id==='l2-commander');await until(()=>state.level===3,'Chapter 3')
   await mine('minerals',220);await mine('energy',80)
   await build('Extractor',950,1250);await build('Turret',1150,1250);await build('Extractor',1350,1250)
+  await fight();console.log('PASS: Citadel approach secured')
   await travel(1970,330);host.emit('interact',code);await until(()=>done('activate-citadel-core'),'Citadel core')
   await fight(e=>e.id==='final-commander');await until(()=>won,'Shared victory')
   console.log('PASS: all three chapters reach shared victory using public player actions')
