@@ -4160,7 +4160,7 @@ const glow =
             {miningActive ? 'STOP MINING' : 'MINE'}
           </button>
         </div>
-        <button className="construction-toggle" aria-expanded={showBuildMenu} onClick={() => setShowBuildMenu(value => !value)}>{showBuildMenu ? "CLOSE BUILD" : "BUILD BASE"}</button>
+        <button className="construction-toggle" aria-expanded={showBuildMenu} onClick={() => setShowBuildMenu(value => !value)}>{showBuildMenu ? `CLOSE BUILD · ${economy.minerals}M / ${economy.energy}E` : 'BUILD BASE'}</button>
         {showBuildMenu && <div className="build-actions">
           <span>
             BASE CONSTRUCTION
