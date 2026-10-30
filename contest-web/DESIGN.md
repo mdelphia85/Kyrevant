@@ -38,3 +38,11 @@ No public deployment or completed visual overhaul is implied by this document.
 - Added scripts/multiplayer-smoke.mjs to exercise room creation, joining, class selection, ready state, and synchronized mission start with independent clients.
 
 Validation: production builds passed during development. The browser preview failed to attach. Socket testing was blocked by local socket restrictions/timeouts, including outside-sandbox retries; separate-device play is not yet verified.
+
+## October 30 delivery pass
+
+Implemented lineage selection and stat bonuses; held-trigger directional combat with vertical aim validation; shield recharge; synthesized sound with mute control; passive Extractor/Power Core income; Barracks healing; chapter-two/three physical landmarks and briefings; victory and replay; recoverable transport interruptions; bounded public payloads; connection/wakeup status and invite links. Marine, lighting, and optimized terrain textures are served locally.
+
+Both client and server TypeScript checks and production bundling pass. A full two-client campaign run through all three chapters, victory, and restart passed twice. The test also checks lineage bonuses, invalid input, transport recovery, shared mining, construction, and all defense waves. Local browser testing now works.
+
+The browser edition and root Render blueprint are prepared in the additive `contest-web/` folder of the GitHub repository checkout under `submission-repo/`; the Unity project is preserved. Public deployment and separate-physical-device verification must be confirmed at the actual Render URL before submission. See DEPLOY.md and SUBMISSION.md.

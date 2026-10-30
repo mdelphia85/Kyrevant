@@ -33,7 +33,6 @@ async function fight(filter=()=>true){
     const p=player(host)
     if(p.downed){await sleep(500);continue}
     const enemy=state.enemies.filter(e=>e.alive&&filter(e)).sort((a,b)=>Math.hypot(a.x-p.x,a.y-p.y)-Math.hypot(b.x-p.x,b.y-p.y))[0]
-    const dx=enemy.x-p.x,dy=enemy.y-p.y,d=Math.hypot(dx,dy)
     for(const socket of [host,guest]){
       const ally=player(socket);if(ally.downed)continue
       const ex=enemy.x-ally.x,ey=enemy.y-ally.y,dist=Math.hypot(ex,ey)
