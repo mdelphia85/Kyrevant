@@ -44,7 +44,7 @@ export default function App() {
     socket.on('connect_error',disconnect)
     socket.on('session-state',restore)
     for(const event of ['room-updated','game-started','mission-started']) socket.on(event,update)
-    if(socket.connected)socket.emit('request-room-state')
+    if(socket.connected)connect()
     return () => {
       socket.off('connect',connect);socket.off('disconnect',disconnect);socket.off('connect_error',disconnect);socket.off('session-state',restore)
       for(const event of ['room-updated','game-started','mission-started']) socket.off(event,update)

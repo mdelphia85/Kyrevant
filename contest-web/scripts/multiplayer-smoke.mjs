@@ -1,7 +1,7 @@
 import { io } from 'socket.io-client'
 import assert from 'node:assert/strict'
 const endpoint = process.env.TEST_SERVER_URL || 'http://127.0.0.1:3001'
-const clients = [io(endpoint,{autoConnect:false}),io(endpoint,{autoConnect:false})]
+const clients = [io(endpoint,{autoConnect:false,extraHeaders:{Origin:endpoint}}),io(endpoint,{autoConnect:false,extraHeaders:{Origin:endpoint}})]
 const once = (socket,event) => new Promise((resolve,reject) => {const timer=setTimeout(()=>reject(new Error(`Timed out: ${event}`)),10000);socket.once(event,data=>{clearTimeout(timer);resolve(data)})})
 const ack = (socket,event,data) => new Promise((resolve,reject) => socket.timeout(10000).emit(event,data,(error,result)=>error?reject(error):resolve(result)))
 try {
