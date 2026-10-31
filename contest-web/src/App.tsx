@@ -10,6 +10,7 @@ type Room = { code:string; players:Player[]; enemies:Enemy[]; phase:'lobby'|'cla
 type Response = {success:boolean; message?:string; room?:Room; roomCode?:string}
 const endpoint = import.meta.env.VITE_SERVER_URL || (import.meta.env.DEV ? `${window.location.protocol}//${window.location.hostname}:3001` : window.location.origin)
 const socket = io(endpoint, {timeout:20000, reconnection:true, reconnectionDelay:1000, reconnectionDelayMax:5000})
+const CLIENT_BUILD='2026-10-30.4'
 
 function Briefing() {
   return <details className="mission-rules"><summary>Mission briefing &amp; how to play</summary>
@@ -22,6 +23,12 @@ function Briefing() {
 }
 
 export default function App() {
+  const [updateAvailable,setUpdateAvailable]=useState(false)
+  useEffect(()=>{
+    const check=()=>{void fetch(`${endpoint}/healthz`,{cache:'no-store'}).then(response=>response.json()).then(data=>setUpdateAvailable(Boolean(data.build&&data.build!==CLIENT_BUILD))).catch(()=>{})}
+    check();const timer=window.setInterval(check,60000);return()=>window.clearInterval(timer)
+  },[])
+  const updateNotice=updateAvailable&&<div className="release-notice" role="status">A newer game build is available. Refresh after this match to load it. <button onClick={()=>window.location.reload()}>Load update</button></div>
   const [name,setName] = useState(() => sessionStorage.getItem('kyrevant-name') || '')
   const [code,setCode] = useState(() => new URLSearchParams(window.location.search).get('room')?.toUpperCase() || '')
   const [room,setRoom] = useState<Room|null>(null)
@@ -74,10 +81,10 @@ export default function App() {
   }
   const status = <div className={`connection-status ${connected?'online':'offline'}`} role="status">{connected?'● SERVER ONLINE':'● CONNECTING — free hosting may take about a minute to wake up'}</div>
   const party = room && <section className="players-panel"><div className="players-heading"><h2>Your unit</h2><span>{room.players.length}/4 players</span></div><div className="player-list">{room.players.map(player=><div className="player-row" key={player.id}><div className="player-avatar">{player.name.charAt(0).toUpperCase()}</div><div className="player-info"><strong>{player.name}{player.id===socket.id?' (you)':''}</strong><span>{player.characterClass?`${player.species||'Human'} · ${player.characterClass}`:player.isHost?'Squad leader':'Operator'}</span></div><div className="online-indicator">{player.ready?'Ready':room.phase==='class-selection'?'Choosing':'Joined'}</div></div>)}</div></section>
-  if(room && (room.phase==='mission'||room.phase==='victory'))return <div className="app-shell mission-shell">{!connected&&<div className="reconnect-banner" role="alert">Connection lost. Reconnecting to your squad… Keep this tab open.</div>}<GameCanvas room={room} socket={socket}/></div>
+  if(room && (room.phase==='mission'||room.phase==='victory'))return <div className="app-shell mission-shell">{updateNotice}{!connected&&<div className="reconnect-banner" role="alert">Connection lost. Reconnecting to your squad… Keep this tab open.</div>}<GameCanvas room={room} socket={socket}/></div>
   return <div className="app-shell"><main className={`game-card ${room?'lobby-card':''}`}>
     <div className="brand">KYREVANT <span className="brand-chapter">/ THE LAST LIGHT</span></div>
-    {status}
+    {status}{updateNotice}<small className="release-build">FRONTIER · BUILD {CLIENT_BUILD}</small>
     {!room ? <><p className="eyebrow">A COOPERATIVE SCI-FI FANTASY CAMPAIGN</p><h1>Survive the fall.<br/>Bring them home.</h1><p className="subtitle">Your unit. An unknown world. A people worth fighting for. Play together from separate devices—no account or download.</p><Briefing/>
       <form onSubmit={event=>{event.preventDefault();enter(false)}}><div className="form-group"><label htmlFor="playerName">Player Name</label><input id="playerName" autoComplete="nickname" value={name} maxLength={20} placeholder="Your callsign" onChange={event=>setName(event.target.value)}/></div><button className="primary-button" disabled={!connected||busy} type="submit">{busy?'Please wait…':'Create Room'}</button></form>
       <div className="divider"><span>OR JOIN YOUR UNIT</span></div><form onSubmit={event=>{event.preventDefault();enter(true)}}><div className="form-group"><label htmlFor="roomCode">Room Code</label><input id="roomCode" autoCapitalize="characters" autoComplete="off" value={code} maxLength={5} placeholder="Five-character code" onChange={event=>setCode(event.target.value.toUpperCase())}/></div><button type="submit" className="secondary-button" disabled={!connected||busy}>Join Room</button></form>

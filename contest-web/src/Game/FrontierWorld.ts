@@ -86,6 +86,34 @@ export function buildFrontierWorld(scene:Scene,shadows:ShadowGenerator){
     return {x,z}
   }
   const refuge=habitat('last-light-refuge',23,10.4,11,8,cream)
+  // Colony infrastructure gives the refuge a recognisable silhouette from spawn.
+  const solar=fieldMetal(scene,'photovoltaic-cells','#173346',.72,.22)
+  const cyan=fieldMetal(scene,'colony-powered-trim','#58c3d2',.3,.3);cyan.emissiveColor=new Color3(.07,.38,.44)
+  for(const [x,z] of [[57.5,26],[67.5,17.5],[85,23.75]]){
+    for(const side of [-1,1]){
+      const array=panel('roof-solar-bank',3.8,.12,5.6,x+side*2.4,4.8,z,solar);array.rotation.z=side*.13
+      for(let k=0;k<6;k++)panel('solar-cell-divider',.025,.025,5.5,x+side*2.4-1.7+k*.65,4.96,z,steel)
+      const buttress=panel('habitat-external-brace',.35,4.7,.65,x+side*5.8,2.35,z+2.2,steel);buttress.rotation.z=side*.16
+      panel('powered-door-strip',.07,2.6,.08,x+side*1.13,1.9,z+4.3,cyan)
+    }
+  }
+  const relay=new TransformNode('colony-orbital-relay',scene);relay.parent=root;relay.position.set(74,0,12)
+  for(const side of [-1,1])beamBetween(scene,'relay-angled-leg',new Vector3(side*3,0,0),new Vector3(side*.6,13,0),.3,relay,steel)
+  for(let i=0;i<6;i++)beamBetween(scene,'relay-cross-bracing',new Vector3(-2.7+i*.35,i*2,0),new Vector3(2.35-i*.35,i*2+2,0),.09,relay,dark)
+  const antennaRing=MeshBuilder.CreateTorus('orbital-relay-ring',{diameter:7,thickness:.28,tessellation:48},scene);antennaRing.parent=relay;antennaRing.position.y=15;antennaRing.rotation.x=Math.PI/2;antennaRing.rotation.y=.35;antennaRing.material=steel
+  const innerRing=MeshBuilder.CreateTorus('orbital-relay-live-channel',{diameter:6.6,thickness:.055,tessellation:48},scene);innerRing.parent=relay;innerRing.position.copyFrom(antennaRing.position);innerRing.rotation.copyFrom(antennaRing.rotation);innerRing.material=cyan
+  // Broad dust routes and wheel ruts break the repeating gravel without obscuring objectives.
+  const routeTexture=new DynamicTexture('colony-dust-routes',{width:1024,height:1024},scene,false)
+  const routeCtx=routeTexture.getContext() as CanvasRenderingContext2D
+  routeCtx.clearRect(0,0,1024,1024);routeCtx.lineCap='round';routeCtx.lineJoin='round'
+  const routes=[[[18,65],[25,55],[36,47],[48,38],[57,31]],[[57,31],[75,34],[93,42],[110,48]],[[57,31],[73,25],[85,28],[103,19],[112,18]]]
+  for(const route of routes){
+    for(const [width,color] of [[50,'rgba(100,86,66,.09)'],[36,'rgba(100,86,66,.12)'],[23,'rgba(116,101,77,.24)']] as const){routeCtx.strokeStyle=color;routeCtx.lineWidth=width;routeCtx.beginPath();route.forEach(([x,z],i)=>i?routeCtx.lineTo(x/130*1024,z/80*1024):routeCtx.moveTo(x/130*1024,z/80*1024));routeCtx.stroke()}
+    for(const offset of [-5,5]){routeCtx.strokeStyle='rgba(33,32,27,.24)';routeCtx.lineWidth=2;routeCtx.beginPath();route.forEach(([x,z],i)=>i?routeCtx.lineTo(x/130*1024+offset,z/80*1024):routeCtx.moveTo(x/130*1024+offset,z/80*1024));routeCtx.stroke()}
+  }
+  routeTexture.hasAlpha=true;routeTexture.update()
+  const routeMaterial=new StandardMaterial('ground-dust-and-ruts',scene);routeMaterial.diffuseTexture=routeTexture;routeMaterial.useAlphaFromDiffuseTexture=true;routeMaterial.specularColor=Color3.Black();routeMaterial.zOffset=-2
+  const routesMesh=MeshBuilder.CreateGround('colony-supply-routes',{width:130,height:80},scene);routesMesh.parent=root;routesMesh.position.set(65,.06,40);routesMesh.material=routeMaterial;routesMesh.isPickable=false
   sign('refuge-sign','LAST LIGHT REFUGE',refuge.x,3.55,refuge.z+4.16,4.4)
   habitat('abandoned-colony-habitat',27,7,8,6,cream)
   habitat('resistance-headquarters',34,9.5,12,8,green)
@@ -134,7 +162,7 @@ export function buildFrontierWorld(scene:Scene,shadows:ShadowGenerator){
   // Large, irregular terrain forms replace low-poly mushroom trees and the black ridge wall.
   for(let i=0;i<75;i++){
     const angle=i/75*Math.PI*2,r=74+rand(i+20)*24
-    rock(`frontier-cliff-${i}`,65+Math.cos(angle)*r,40+Math.sin(angle)*r,3+rand(i+7)*5,3+rand(i+8)*12,3+rand(i+9)*4)
+    rock(`frontier-cliff-${i}`,65+Math.cos(angle)*r,40+Math.sin(angle)*r,6+rand(i+7)*11,2+Math.pow(rand(i+8),2)*20,4+rand(i+9)*8)
   }
   for(let i=0;i<34;i++){
     const x=rand(i+300)*132,z=rand(i+400)*80
