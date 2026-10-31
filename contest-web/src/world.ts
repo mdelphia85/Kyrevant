@@ -1,0 +1,2 @@
+export const WORLD_METERS_PER_UNIT = 0.05
+export const PLAYER_HIT_RADIUS_UNITS = 12

@@ -26,7 +26,6 @@ import {
   AssetContainer,
   AnimationGroup,
   PBRMaterial,
-  SceneLoader,
   CubeTexture,
   PointerEventTypes,
   Scene,
@@ -41,17 +40,14 @@ import '@babylonjs/loaders/glTF'
 import type { Socket } from 'socket.io-client'
 import './GameCanvas.css'
 import Arrival from './Arrival'
-import { buildWildFrontier } from './WildFrontier'
+import { buildFrontierWorld, buildFieldStructure, buildOreDeposit, FRONTIER_SCALE } from './FrontierWorld'
+import { createFieldRifle, type EquipmentStatus } from './FieldRifle'
+import { WORLD_METERS_PER_UNIT } from '../world'
+import { addArmoredHelmet, addWorldServiceRifle, loadFieldSquad } from './DetailedAssets'
 import TouchControls from './TouchControls'
 import { CombatAudio } from './CombatAudio'
-// Self-contained Babylon scene visuals; no Visuals.ts dependency.
-// A fully modeled, skinned and animated human sci-fi marine replaces the
-// stand-in geometric character. Credit: Vanguard by T. Choonyung / Adobe
-// Mixamo, bundled as the Three.js Soldier sample. The model stays an embedded
-// gameplay asset and must not be redistributed as a standalone stock model.
-const KYREVANT_MARINE_URL =
-  '/assets/unit-marine.glb'
-
+import { CombatInput } from './CombatInput'
+// Textured tactical character assets and retargeted clips are bundled locally.
 // CC0 scanned rocky ground by Rob Tuytel / Poly Haven. Real photos, albedo and
 // tangent-space normal detail -- not a noise-only placeholder material.
 const KYREVANT_GROUND_COLOR_URL =
@@ -134,103 +130,25 @@ function createPlanetTerrainTextures(scene: Scene) {
 // Sky is rendered analytically in linear color. This removes the broken
 // additive sky texture and gives the planet a stable dusk atmosphere.
 function createAtmosphere(scene: Scene) {
-  Effect.ShadersStore['kyrevantSkyVertexShader'] = `
+  const sky=MeshBuilder.CreateSphere('frontier-panorama',{diameter:900,segments:48,sideOrientation:Mesh.BACKSIDE},scene)
+  Effect.ShadersStore['frontierSkyVertexShader']=`
     precision highp float;
-    attribute vec3 position;
-    uniform mat4 worldViewProjection;
-    uniform mat4 world;
-    varying vec3 vDirection;
-    void main() {
-      vDirection = normalize((world * vec4(position, 0.0)).xyz);
-      gl_Position = worldViewProjection * vec4(position, 1.0);
-    }
-  `
-  Effect.ShadersStore['kyrevantSkyFragmentShader'] = `
-    precision highp float;
-    varying vec3 vDirection;
-    float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
-    float noise(vec2 p) {
-      vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
-      return mix(mix(hash(i),hash(i+vec2(1.0,0.0)),f.x),
-                 mix(hash(i+vec2(0.0,1.0)),hash(i+vec2(1.0,1.0)),f.x),f.y);
-    }
-    void main() {
-      vec3 d=normalize(vDirection);
-      float up=clamp(d.y*0.5+0.5,0.0,1.0);
-      vec3 zenith=vec3(0.045,0.12,0.22);
-      vec3 upper=vec3(0.16,0.30,0.39);
-      vec3 horizon=vec3(0.48,0.43,0.33);
-      vec3 bottom=vec3(0.084,0.077,0.086);
-      vec3 col=mix(bottom,horizon,smoothstep(0.08,0.52,up));
-      col=mix(col,upper,smoothstep(0.49,0.75,up));
-      col=mix(col,zenith,smoothstep(0.71,1.0,up));
-      vec3 sunDirection=normalize(vec3(-0.58, 0.12, -0.82));
-      float sundot=max(dot(d,sunDirection),0.0);
-      col+=vec3(0.34,0.16,0.085)*pow(sundot,24.0)*(1.0-smoothstep(0.5,0.95,up));
-      col+=vec3(0.77,0.49,0.29)*pow(sundot,6000.0);
-      float cloud=noise(d.xz*13.0+vec2(d.y*8.0,0.0))*.60+
-                  noise(d.xz*35.0+d.y*17.0)*.28+
-                  noise(d.xz*78.0)*.12;
-      float veil=smoothstep(0.47,0.66,cloud)*(1.0-smoothstep(0.73,0.95,up));
-      col=mix(col,vec3(.17,.19,.22),veil*.21);
-      // The sky is designed for the post-process exposure used in the world.
-      gl_FragColor=vec4(col,1.0);
-    }
-  `
-  const sky = MeshBuilder.CreateSphere('kyrevant-atmosphere', {diameter:190,segments:40},scene)
-  const shader=new ShaderMaterial('kyrevant-atmosphere-shader',scene,'kyrevantSky',{
-    attributes:['position'], uniforms:['world','worldViewProjection'],
-  })
-  shader.backFaceCulling=false
-  shader.disableDepthWrite=true
-  sky.material=shader
-  sky.isPickable=false
-  sky.applyFog=false
-  // The camera follows this sphere explicitly. Do not also set
-  // infiniteDistance, which applies an additional camera translation.
-  sky.infiniteDistance=false
+    attribute vec3 position;attribute vec2 uv;uniform mat4 worldViewProjection;varying vec2 vUV;
+    void main(){vUV=uv;gl_Position=worldViewProjection*vec4(position,1.0);}`
+  Effect.ShadersStore['frontierSkyFragmentShader']=`
+    precision highp float;varying vec2 vUV;uniform sampler2D panorama;
+    void main(){
+      vec3 color=texture2D(panorama,vUV).rgb;
+      float edge=1.0-smoothstep(0.0,0.085,min(vUV.x,1.0-vUV.x));
+      vec3 opposite=texture2D(panorama,vec2(1.0-vUV.x,vUV.y)).rgb;
+      color=mix(color,opposite,edge*0.5);
+      gl_FragColor=vec4(pow(color,vec3(2.2)),1.0);
+    }`
+  const material=new ShaderMaterial('frontier-sky',scene,'frontierSky',{attributes:['position','uv'],uniforms:['worldViewProjection'],samplers:['panorama']})
+  material.setTexture('panorama',new Texture('/assets/kyrevant-frontier-sky.webp',scene,false,false))
+  material.backFaceCulling=false;material.disableDepthWrite=true
+  sky.material=material;sky.isPickable=false;sky.applyFog=false
   return sky
-}
-
-// The distant crater wall is original vertex geometry, not a ring of box props.
-function buildFarLandscape(scene:Scene) {
-  const root=new TransformNode('kyrevant-canyon-backdrop',scene)
-  const center=new Vector3(25,0,16)
-  for(let layer=0;layer<3;layer++) {
-    const segments=192
-    const verts:number[]=[]
-    const indexes:number[]=[]
-    const innerRadius=37+layer*15
-    const outerRadius=innerRadius+9
-    for(let i=0;i<=segments;i++) {
-      const angle=(i%segments)/segments*Math.PI*2
-      const r=innerRadius+smoothNoise(i/9,layer*13,8)*2
-      const large=smoothNoise(Math.cos(angle)*7+12,Math.sin(angle)*7+23,18+layer)
-      const ridged=smoothNoise(Math.cos(angle)*39,Math.sin(angle)*39,27+layer)
-      const upper=3.4+large*8.5+ridged*2.5+layer*1.9
-      for (const [radius,height] of [[r,-1],[r+1,upper*.72],[outerRadius,upper],[outerRadius+12,upper*.62]] as const) {
-        verts.push(center.x+Math.cos(angle)*radius,height,center.z+Math.sin(angle)*radius)
-      }
-      if (i<segments) for(let ring=0;ring<3;ring++) {
-        const a=i*4+ring,b=a+4
-        indexes.push(a,b,a+1,a+1,b,b+1)
-      }
-    }
-    const mesh=new Mesh(`canyon-ridge-${layer}`,scene)
-    const data=new VertexData()
-    data.positions=verts; data.indices=indexes
-    const norms:number[]=[];VertexData.ComputeNormals(verts,indexes,norms)
-    data.normals=norms;data.applyToMesh(mesh)
-    const mat=new StandardMaterial(`ridge-rock-${layer}`,scene)
-    mat.diffuseColor=layer===0?new Color3(.20,.18,.17):new Color3(.105,.13,.17)
-    mat.specularColor=new Color3(.025,.03,.04)
-    mat.backFaceCulling=false
-    mesh.material=mat
-    mesh.parent=root
-    mesh.isPickable=false
-    mesh.receiveShadows=true
-  }
-  return root
 }
 
 const armorTextureCache = new WeakMap<Scene, DynamicTexture>()
@@ -265,442 +183,6 @@ function metal(scene: Scene, name: string, base: string, glow?: string) {
   mat.diffuseTexture = scratchedMetalTexture(scene)
   if (glow) mat.emissiveColor = Color3.FromHexString(glow)
   return mat
-}
-
-function createArmoredSoldier(scene: Scene, role: Role, id: string): TransformNode {
-  const root = new TransformNode(`soldier-${id}`, scene)
-  const enemy = ['Raider', 'Heavy', 'Commander'].includes(role)
-  const heavy = role === 'Heavy' || role === 'Commander'
-  const armor = metal(scene, `${id}-armor`, enemy ? '#50565c' : '#4c596a')
-  const plates = metal(scene, `${id}-plates`, enemy ? '#7d4942' : '#84909a')
-  const dark = metal(scene, `${id}-joints`, '#151d28')
-  const detail = metal(scene, `${id}-detail`, enemy ? '#a05544' : '#344356')
-  const visor = metal(scene, `${id}-visor`, '#091c28', enemy ? '#451813' : '#0d3848')
-  const light = metal(scene, `${id}-light`, enemy ? '#e35535' : '#44aedd', enemy ? '#6e1305' : '#103f59')
-  const weapon = metal(scene, `${id}-weapon`, '#1e2832')
-  const scale = heavy ? 1.12 : 1
-  root.scaling.setAll(scale)
-
-  const box = (n: string, w: number, h: number, d: number, x: number, y: number, z: number, mat: StandardMaterial, parent: TransformNode = root) => {
-    const m = MeshBuilder.CreateBox(`${id}-${n}`, {width:w,height:h,depth:d}, scene)
-    m.position.set(x,y,z)
-    m.material = mat
-    m.parent = parent
-    return m
-  }
-  const sphere = (n:string, diameter:number, x:number,y:number,z:number,mat:StandardMaterial, sx=1,sy=1,sz=1) => {
-    const m = MeshBuilder.CreateSphere(`${id}-${n}`, {diameter,segments:16},scene)
-    m.position.set(x,y,z); m.scaling.set(sx,sy,sz); m.material=mat; m.parent=root
-    return m
-  }
-  const limb = (n:string,x:number,y:number,z:number,length:number,width:number,mat:StandardMaterial,rotZ=0) => {
-    const m=MeshBuilder.CreateCylinder(`${id}-${n}`,{height:length,diameterTop:width*0.92,diameterBottom:width,tessellation:12},scene)
-    m.position.set(x,y,z);m.rotation.z=rotZ;m.material=mat;m.parent=root
-    return m
-  }
-
-  // Transparent contact-shadow decal anchors each soldier to the ground.
-  // Unlike expensive dynamic shadow casters, this also works with moving units.
-  const contactShadow=MeshBuilder.CreateDisc(`${id}-contact-shadow`,{radius:.65,tessellation:24},scene)
-  contactShadow.parent=root
-  contactShadow.position.y=.018
-  contactShadow.rotation.x=Math.PI/2
-  contactShadow.isPickable=false
-  const contactMaterial=new StandardMaterial(`${id}-contact-shadow-mat`,scene)
-  contactMaterial.disableLighting=true
-  contactMaterial.diffuseColor=new Color3(.025,.022,.027)
-  contactMaterial.alpha=.32
-  contactMaterial.zOffset=-1
-  contactShadow.material=contactMaterial
-
-  // Bipedal proportions, independent of the original novelty-character asset pack.
-  box('pelvis', .54,.26,.36,0,.94,0,armor)
-  box('abdomen', .43,.4,.32,0,1.24,0,dark)
-  box('chest', .72,.64,.4,0,1.68,0,armor)
-  box('breastplate', .62,.33,.1,0,1.76,.23,plates)
-  box('sternum',.14,.43,.06,0,1.59,.31,detail)
-  box('collar',.6,.13,.44,0,2.05,0,dark)
-  box('backpack', .48,.58,.25,0,1.65,-.31,armor)
-  box('backpack-fin-L',.12,.4,.12,-.19,1.6,-.5,detail)
-  box('backpack-fin-R',.12,.4,.12,.19,1.6,-.5,detail)
-  box('belt',.62,.14,.44,0,1.12,0,dark)
-  box('belt-buckle',.14,.12,.07,0,1.13,.25,plates)
-
-  for(const sign of [-1,1]) {
-    const s = sign === -1 ? 'L' : 'R'
-    limb(`thigh-${s}`,sign*.2,.7,0,.64,.27,armor,sign*.05)
-    sphere(`knee-${s}`, .29,sign*.2,.39,.03,plates,.96,.75,1)
-    limb(`shin-${s}`,sign*.21,.23,.01,.42,.23,dark)
-    box(`shinplate-${s}`,.21,.3,.11,sign*.21,.23,.16,plates)
-    box(`boot-${s}`,.28,.18,.45,sign*.21,.1,.09,dark)
-    sphere(`shoulder-${s}`, .36,sign*.48,1.9,0,plates,1.12,.84,1.12)
-    limb(`bicep-${s}`,sign*.51,1.64,0,.36,.19,dark,sign*.14)
-    box(`upperarm-${s}`,.25,.24,.24,sign*.52,1.67,.04,armor)
-    sphere(`elbow-${s}`, .23,sign*.53,1.43,.03,dark)
-    limb(`forearm-${s}`,sign*.53,1.28,.11,.31,.2,armor,sign*.12)
-    box(`forearm-plate-${s}`,.24,.24,.12,sign*.55,1.25,.2,plates)
-    sphere(`glove-${s}`, .22,sign*.52,1.1,.18,dark)
-    box(`hip-pouch-${s}`,.18,.21,.24,sign*.36,.92,-.08,detail)
-  }
-  sphere('helmet-shell', .48, 0,2.25,0,armor,1.07,1.15,1.14)
-  sphere('helm-front-plate', .40,0,2.23,.12,plates,1.02,.74,.69)
-  sphere('helmet-rear-shell',.42,0,2.30,-.13,armor,1.1,.92,.65)
-  sphere('faceplate',.33,0,2.245,.232,visor,1.0,.45,.26)
-  box('visor-lip',.32,.035,.035,0,2.17,.29,plates)
-  sphere('goggle-lens',.32,0,2.32,.260,visor,1.17,.22,.18)
-  box('visor-edge',.4,.026,.08,0,2.22,.267,light)
-  box('respirator',.23,.13,.15,0,2.12,.25,dark)
-  box('crown',.23,.1,.33,0,2.49,-.02,plates)
-  box('helmet-ear-L',.12,.18,.2,-.255,2.25,.01,dark)
-  box('helmet-ear-R',.12,.18,.2,.255,2.25,.01,dark)
-  sphere('power-core', .14, 0,1.75,.31,light,.9,.9,.35)
-  for(const sign of [-1,1]) {
-    box(`chest-latch-${sign}`,.06,.18,.05,sign*.23,1.69,.31,dark)
-    box(`helmet-light-${sign}`,.06,.045,.07,sign*.18,2.41,.21,light)
-  }
-  // Riveted armor segments, articulated soft joints and tactical utility kit.
-  for(const side of [-1,1]) {
-    const prefix=side===1?'R':'L'
-    for(let j=0;j<3;j++) {
-      const rib=box(`ribbed-plate-${prefix}-${j}`,.12,.07,.28,side*(.23+j*.045),1.44-j*.115,.065,plates)
-      rib.rotation.z=side*.10
-    }
-    for(let j=0;j<3;j++) box(`thigh-straps-${prefix}-${j}`,.29,.032,.34,side*.2,.72+j*.10,0,dark)
-    sphere(`hip-ball-${prefix}`,.25,side*.21,.86,0,dark)
-    box(`comms-cable-${prefix}`,.035,.35,.035,side*.34,1.67,-.21,detail)
-    box(`chevron-${prefix}`,.15,.055,.07,side*.18,1.90,.25,light)
-    for(let k=0;k<4;k++) box(`glove-finger-${prefix}-${k}`,.045,.12,.075,side*(.44+k*.035),1.05,.20,dark)
-  }
-  box('collar-seal',.43,.12,.41,0,2.0,0,dark)
-  box('breastplate-keel',.11,.35,.05,0,1.72,.318,plates)
-  box('neck-comm-port',.17,.08,.085,-.18,2.04,.14,detail)
-  // Integrated rifle: receiver, magazine, sight and a barrel connected to the arms.
-  box('rifle-receiver',.54,.17,.22,.07,1.45,.40,weapon)
-  box('rifle-stock',.25,.19,.16,-.26,1.43,.39,detail)
-  box('rifle-grip',.11,.25,.13,.09,1.28,.42,dark)
-  box('rifle-mag',.15,.24,.18,-.07,1.26,.42,dark)
-  box('rifle-barrel',.13,.12,.53,.35,1.46,.40,weapon)
-  box('rifle-optic',.13,.12,.17,.03,1.58,.38,visor)
-  box('rifle-emitter',.08,.08,.04,.63,1.46,.4,light)
-  return root
-}
-
-function createWeaponView(scene: Scene, camera: FreeCamera) {
-  const root = new TransformNode('fps-rifle-viewmodel', scene)
-  root.parent = camera
-  root.position.set(.25,-.29,.72)
-  root.scaling.setAll(.48)
-  root.rotation.y = -.06
-  const gun = metal(scene,'fps-gun-body','#263443')
-  const edge = metal(scene,'fps-gun-edge','#637385')
-  const grip = metal(scene,'fps-gun-grip','#131b27')
-  const cyan = metal(scene,'fps-gun-cyan','#247b9c','#155779')
-  const skin = metal(scene,'fps-gloves','#424c57')
-  const cube=(name:string,w:number,h:number,d:number,x:number,y:number,z:number,mat:StandardMaterial) => {
-    const m=MeshBuilder.CreateBox(name,{width:w,height:h,depth:d},scene)
-    m.parent=root;m.position.set(x,y,z);m.material=mat;m.isPickable=false
-    return m
-  }
-  // Original compact service rifle: enclosed upper receiver and rear power pack.
-  cube('rifle-stock',.25,.26,.34,0,-.02,-.33,gun)
-  cube('rifle-stock-pad',.26,.27,.045,0,-.02,-.51,grip)
-  cube('rifle-upper-shroud',.29,.16,.70,0,.13,.27,gun)
-  cube('rifle-shroud-stripe',.293,.028,.48,0,.15,.34,edge)
-  const designation = new DynamicTexture('rifle-identification', {width:256,height:128}, scene, false)
-  const labelContext = designation.getContext()
-  labelContext.fillStyle = '#14232b'; labelContext.fillRect(0,0,256,128)
-  labelContext.fillStyle = '#b8e8e9'; labelContext.font = 'bold 40px monospace'
-  labelContext.fillText('K-7',20,58)
-  labelContext.font = '18px monospace'; labelContext.fillText('UNIT SERVICE',20,94)
-  designation.update()
-  const designationMaterial = new StandardMaterial('rifle-designation-material', scene)
-  designationMaterial.diffuseTexture = designation
-  designationMaterial.emissiveColor = new Color3(.18,.28,.29)
-  const designationPlate = MeshBuilder.CreatePlane('rifle-designation-plate',{width:.17,height:.085},scene)
-  designationPlate.parent=root;designationPlate.position.set(.149,.14,.12);designationPlate.rotation.y=-Math.PI/2
-  designationPlate.material=designationMaterial;designationPlate.isPickable=false
-  cube('rifle-receiver',.24,.17,.53,0,0,.05,gun)
-  cube('rifle-machined-chassis',.265,.09,.62,0,.065,.09,edge)
-  cube('rifle-top-rail',.18,.045,.43,0,.115,.07,edge)
-  cube('rifle-barrel',.105,.1,.62,0,-.01,.57,grip)
-  cube('rifle-muzzle',.16,.13,.08,0,-.01,.89,edge)
-  cube('rifle-scope',.115,.1,.2,0,.2,.08,grip)
-  cube('rifle-sight',.045,.065,.06,0,.25,.16,cyan)
-  cube('rifle-mag',.14,.27,.17,0,-.2,.04,grip).rotation.x=-.12
-  cube('rifle-pistol-grip',.12,.27,.14,.03,-.2,-.14,grip).rotation.x=.26
-  cube('rifle-battery',.22,.12,.1,.0,.04,-.22,edge)
-  cube('rifle-battery-light',.14,.035,.025,0,.1,-.22,cyan)
-  cube('right-glove',.16,.13,.19,.14,-.18,-.1,skin)
-  cube('left-glove',.16,.13,.2,-.16,-.11,.33,skin)
-  cube('right-forearm',.25,.19,.52,.21,-.24,-.31,skin).rotation.y=.25
-  cube('left-forearm',.24,.18,.54,-.26,-.24,.13,skin).rotation.y=-.23
-  const cylinder=(name:string,diameter:number,length:number,x:number,y:number,z:number,mat:StandardMaterial) => {
-    const mesh=MeshBuilder.CreateCylinder(name,{diameter,height:length,tessellation:20},scene)
-    mesh.parent=root
-    mesh.position.set(x,y,z)
-    mesh.rotation.x=Math.PI/2
-    mesh.material=mat
-    mesh.isPickable=false
-    return mesh
-  }
-  const optics=metal(scene,'rifle-optic-lens','#132f3d','#16445c')
-  cylinder('rifle-heavy-barrel',.098,.67,0,-.01,.57,grip)
-  cylinder('rifle-front-housing',.16,.12,0,-.01,.77,edge)
-  cylinder('rifle-flash-suppressor',.14,.17,0,-.01,.94,grip)
-  cylinder('rifle-optic-housing',.14,.22,0,.19,.1,edge)
-  cylinder('rifle-rear-lens',.12,.01,0,.19,-.015,optics)
-  for(const sign of [-1,1]) {
-    cube(`rifle-lower-rail-${sign}`,.035,.06,.46,sign*.13,-.09,.26,edge)
-    cube(`rifle-vent-${sign}`,.015,.055,.30,sign*.122,.08,.21,grip)
-    for(let i=0;i<4;i++) cube(`vent-notch-${sign}-${i}`,.018,.04,.028,sign*.133,.085,.05+i*.095,cyan)
-  }
-  cube('rifle-bolt-plate',.014,.10,.18,.127,.025,-.025,edge)
-  cube('rifle-trigger-guard',.025,.04,.16,.012,-.12,-.09,edge)
-  // Layered machined detailing breaks up the block silhouette in first person.
-  for(let side of [-1,1]) {
-    cube(`optic-support-${side}`,.027,.072,.24,side*.11,.155,.08,edge)
-    cube(`forend-armor-${side}`,.075,.13,.44,side*.13,-.013,.48,gun)
-    cube(`muzzle-cutout-${side}`,.025,.08,.15,side*.09,-.012,.90,grip)
-    cube(`palm-plate-${side}`,.12,.045,.21,side*.20,-.105,side===1?-.08:.3,edge)
-    for(let i=0;i<6;i++) {
-      cube(`barrel-heat-slot-${side}-${i}`,.014,.014,.048,side*.184,.041,.28+i*.077,grip)
-    }
-  }
-  const muzzleCap=cylinder('muzzle-inner-core',.066,.095,0,-.01,1.017,grip)
-  muzzleCap.position.z=1.014
-  cylinder('optic-forward-lens',.117,.013,0,.19,.205,optics)
-  for(let k=0;k<5;k++) cube(`top-rail-teeth-${k}`,.19,.024,.025,0,.151,-.08+k*.107,grip)
-  cube('sling-anchor',.031,.09,.12,-.152,.07,-.22,edge)
-  cube('ejection-port',.014,.078,.13,.133,.015,.07,grip)
-  cube('ejection-guide',.02,.018,.15,.147,.078,.07,edge)
-
-  // Camera-space viewmodel stays attached to the first-person camera.
-
-  const flash=MeshBuilder.CreateCylinder('fps-muzzle-flash',{height:.36,diameterTop:0,diameterBottom:.2,tessellation:9},scene)
-  flash.parent=root;flash.position.set(0,-.01,1.04);flash.rotation.x=Math.PI/2
-  flash.material=metal(scene,'fps-muzzle-flash-material','#ffe6b1','#ff9837')
-  flash.isPickable=false;flash.setEnabled(false)
-  return { root, flash }
-}
-
-function createCrashShip(scene: Scene, x: number, z: number): TransformNode {
-  const root=new TransformNode('kyrevant-crashed-courier',scene)
-  root.position.set(x,.68,z);root.rotation.set(-.07,-.48,-.13)
-  const hull=metal(scene,'crash-hull','#485868')
-  const edge=metal(scene,'crash-edge','#25313e')
-  const scorched=metal(scene,'crash-scorch','#201d1f')
-  const glass=metal(scene,'crash-cockpit','#102a3b','#092334')
-  const ember=metal(scene,'crash-embers','#a04d30','#511907')
-  const box=(name:string,w:number,h:number,d:number,px:number,py:number,pz:number,mat:StandardMaterial,rz=0) => {
-    const m=MeshBuilder.CreateBox(name,{width:w,height:h,depth:d},scene)
-    m.parent=root;m.position.set(px,py,pz);m.rotation.z=rz;m.material=mat;m.receiveShadows=true
-    return m
-  }
-  // Angular troop-carrier fuselage with a flattened cockpit and exposed engines.
-  box('ship-center-fuselage',2.2,1.1,5.2,0,.55,0,hull)
-  box('ship-upper-spine',1.2,.48,3.4,0,1.25,-.38,edge)
-  box('ship-cockpit',1.4,.40,1.25,0,1.12,1.62,glass)
-  box('ship-forward-nose',1.05,.55,1.25,0,.57,2.95,hull)
-  box('ship-floor-grating',1.7,.07,1.8,0,.15,-2.1,scorched)
-  for(const side of [-1,1]) {
-    box(`ship-delta-wing-${side}`,3.3,.18,2.4,side*2.2,.61,-.26,hull,side*.17)
-    box(`ship-wing-edge-${side}`,2.5,.10,.35,side*2.55,.69,.74,edge,side*.17)
-    box(`ship-fin-${side}`,.26,.93,1.6,side*1.28,1.3,-1.35,edge,side*-.15)
-    const engine=MeshBuilder.CreateCylinder(`ship-damaged-engine-${side}`,{height:1.95,diameter:1.0,tessellation:14},scene)
-    engine.parent=root;engine.rotation.x=Math.PI/2;engine.position.set(side*1.55,.64,-1.72);engine.material=scorched
-    const vent=MeshBuilder.CreateCylinder(`ship-exhaust-${side}`,{height:.07,diameter:.78,tessellation:18},scene)
-    vent.parent=root;vent.rotation.x=Math.PI/2;vent.position.set(side*1.55,.64,-2.75);vent.material=ember
-    box(`ship-side-armor-${side}`,.12,.6,3.2,side*1.17,.6,.06,hull)
-  }
-  // Struck-down vehicle: displaced metal plates and exhaust heat convey impact.
-  box('ship-torn-plate',1.25,.08,1.2,-2.8,-.26,.5,scorched,.3)
-  box('ship-impact-shard',.8,.14,.9,2.3,-.4,2.7,edge,-.2)
-  return root
-}
-
-
-function createFrontierCivilian(scene: Scene, id:string, innkeeper:boolean): TransformNode {
-  const root=new TransformNode(`civilian-${id}`,scene)
-  const coat=new StandardMaterial(`civilian-coat-${id}`,scene)
-  coat.diffuseColor=Color3.FromHexString(innkeeper?'#a4774f':'#777e74')
-  const face=new StandardMaterial(`civilian-face-${id}`,scene)
-  face.diffuseColor=Color3.FromHexString('#bd9377')
-  const dark=new StandardMaterial(`civilian-boots-${id}`,scene)
-  dark.diffuseColor=Color3.FromHexString('#252a31')
-  const body=MeshBuilder.CreateCylinder(`civilian-body-${id}`,{height:1.15,diameterTop:.46,diameterBottom:.8,tessellation:12},scene)
-  body.parent=root;body.position.y=.98;body.material=coat
-  const head=MeshBuilder.CreateSphere(`civilian-head-${id}`,{diameter:.44,segments:14},scene)
-  head.parent=root;head.position.y=1.78;head.material=face
-  const hair=MeshBuilder.CreateSphere(`civilian-hair-${id}`,{diameter:.47,segments:10},scene)
-  hair.parent=root;hair.position.y=1.93;hair.scaling.y=.40;hair.material=dark
-  for(const side of [-1,1]){
-    const arm=MeshBuilder.CreateCylinder(`civilian-arm-${id}-${side}`,{height:.9,diameter:.19,tessellation:8},scene)
-    arm.parent=root;arm.position.set(side*.37,1.09,0);arm.rotation.z=side*.22;arm.material=coat
-    const leg=MeshBuilder.CreateCylinder(`civilian-leg-${id}-${side}`,{height:.64,diameter:.22,tessellation:8},scene)
-    leg.parent=root;leg.position.set(side*.19,.34,0);leg.material=dark
-  }
-  return root
-}
-
-// CHAPTER ONE SET PIECE — a physical mission world rather than objective markers
-// over three identical shelters. The story locations intentionally share the
-// server's world coordinate system (0.02 meters per unit).
-function createFrontierChapterWorld(scene: Scene) {
-  // Four districts occupy different parts of the server-authoritative world.
-  // The detailed buildings are loaded from the bundled environment OBJ pack.
-  // This foreground set provides unique landmarks and actual mission consequences.
-  const root = new TransformNode('chapter-one-four-distinct-districts', scene)
-  const mat = (name:string,color:string,glow?:string) => {
-    const m = new StandardMaterial(`chapter-${name}`,scene)
-    m.diffuseColor=Color3.FromHexString(color)
-    m.specularColor=new Color3(.12,.16,.18)
-    if(glow)m.emissiveColor=Color3.FromHexString(glow)
-    return m
-  }
-  const black=mat('scorched-metal','#1d2730')
-  const steel=mat('armored-steel','#435768')
-  const dark=mat('settlement-concrete','#303b41')
-  const copper=mat('amber-civic-lights','#a87c40','#795019')
-  const ice=mat('recovery-cyan','#50c8eb','#2b91d3')
-  const threat=mat('enemy-signal','#c06a30','#b75b24')
-  const smoke=mat('impact-smoke','#242932')
-  const box=(name:string,x:number,y:number,z:number,w:number,h:number,d:number,m:StandardMaterial,r=0) => {
-    const o=MeshBuilder.CreateBox(`chapter-${name}`,{width:w,height:h,depth:d},scene)
-    o.parent=root;o.position.set(x,y,z);o.rotation.y=r;o.material=m;o.receiveShadows=true
-    return o
-  }
-  const cyl=(name:string,x:number,y:number,z:number,diam:number,h:number,m:StandardMaterial) => {
-    const o=MeshBuilder.CreateCylinder(`chapter-${name}`,{diameter:diam,height:h,tessellation:16},scene)
-    o.parent=root;o.position.set(x,y,z);o.material=m;return o
-  }
-  // LANDING ZONE: a burned flight deck and torn fuselage, not a corridor of shops.
-  for(let i=0;i<10;i++){
-    const a=i*.63
-    const x=15+Math.sin(a)*7.8,z=27+Math.cos(a)*5.7
-    const deck=box(`impact-debris-${i}`,x,.12,z,2.4,.13,.6,i%2?steel:black,a)
-    deck.rotation.z=(i%3-1)*.14
-  }
-  for(const side of [-1,1]){
-    box(`struck-engine-${side}`,15+side*4.3,.65,28.6,1.3,1.3,2.9,black,side*.27)
-    cyl(`engine-exhaust-${side}`,15+side*4.3,.66,30,1.12,.12,threat)
-    box(`fallen-wing-${side}`,15+side*3.7,.85,25,5.3,.24,2.1,steel,side*.47)
-  }
-  // Recovery hardware is visible from spawn and changes after the co-op upload.
-  // The plea rests on a rock created at the story anchor, beside the wreck.
-  const activeBeam=cyl('note-locator-light',10,1.22,22,.07,.16,copper)
-  const ring=MeshBuilder.CreateTorus('blackbox-recovery-ring',{diameter:1.9,thickness:.035,tessellation:48},scene)
-  ring.parent=root;ring.position.set(10,.19,22);ring.material=ice
-  for(let i=0;i<3;i++){
-    const x=11+i*2.65,z=29+i*.37
-    box(`emergency-pod-${i}`,x,.62,z,1.6,1.25,2.8,black,i*.22)
-    box(`emergency-pod-window-${i}`,x,1.12,z-.65,1.26,.38,.08,threat,i*.22)
-  }
-  const fire=[] as ReturnType<typeof MeshBuilder.CreateSphere>[]
-  for(let i=0;i<7;i++){
-    const f=MeshBuilder.CreateSphere(`crash-fire-${i}`,{diameter:.35+(i%3)*.25,segments:9},scene)
-    f.parent=root;f.position.set(9.8+i*.55,.4+(i%3)*.32,25.3+(i%2)*.6)
-    f.material=threat;f.scaling.set(.4,1.8,.4);f.visibility=0;fire.push(f)
-  }
-  const sootCloud=[] as ReturnType<typeof MeshBuilder.CreateSphere>[]
-  for(let i=0;i<9;i++){
-    const f=MeshBuilder.CreateSphere(`crash-smoke-${i}`,{diameter:1.3+(i%4)*.52,segments:9},scene)
-    f.parent=root;f.position.set(10.4+Math.sin(i)*1.6,2+i*.91,25.2+Math.cos(i)*.6)
-    f.material=smoke;f.visibility=0;sootCloud.push(f)
-  }
-  const plumeTexture=new DynamicTexture('soft-impact-plume',{width:64,height:64},scene,false)
-  const plumeCtx=plumeTexture.getContext()
-  const plumeGradient=plumeCtx.createRadialGradient(32,32,0,32,32,32)
-  plumeGradient.addColorStop(0,'rgba(255,255,255,.6)');plumeGradient.addColorStop(.35,'rgba(255,255,255,.28)');plumeGradient.addColorStop(1,'rgba(255,255,255,0)')
-  plumeCtx.fillStyle=plumeGradient;plumeCtx.fillRect(0,0,64,64);plumeTexture.hasAlpha=true;plumeTexture.update()
-  const plume=new ParticleSystem('wreck-smoke',100,scene)
-  plume.particleTexture=plumeTexture;plume.emitter=new Vector3(14,.7,27)
-  plume.minEmitBox=new Vector3(-1,0,-.4);plume.maxEmitBox=new Vector3(1,0,.4)
-  plume.color1=new Color4(.12,.13,.14,.35);plume.color2=new Color4(.22,.23,.23,.2);plume.colorDead=new Color4(.2,.22,.24,0)
-  plume.minSize=.5;plume.maxSize=2;plume.minLifeTime=3;plume.maxLifeTime=5
-  plume.emitRate=14;plume.direction1=new Vector3(.1,.8,0);plume.direction2=new Vector3(.5,1.2,.1)
-  plume.minEmitPower=.6;plume.maxEmitPower=1;plume.blendMode=ParticleSystem.BLENDMODE_STANDARD;plume.start()
-  // SETTLEMENT: broad roads, market light and approach barricades. The inn OBJ
-  // is at 23,12; its dialogue anchor stays at the server's 23,12 coordinates.
-  for(let i=0;i<8;i++){
-    box(`settlement-road-${i}`,19+i*.86,.025,16.1-i*.52,1.6,.065,2.9,dark,-.55)
-  }
-  for(const [x,z] of [[19.3,10],[26.4,10.2],[20,14.6],[26,14.5]] as const){
-    cyl(`settlement-lamp-post-${x}`,x,2,z,.14,3.9,steel)
-    cyl(`settlement-lamp-${x}`,x,4.05,z,.49,.23,copper)
-  }
-  // RESISTANCE: separate from civilians, its objective radio stays at 30,13.8.
-  for(const [x,z] of [[29.7,7.1],[37.9,7.1],[29.7,16.2],[37.9,16.2]] as const){
-    cyl(`resistance-watchtower-${x}-${z}`,x,2,z,.88,4,steel)
-    box(`resistance-observation-${x}-${z}`,x,4.2,z,2.2,.25,2.2,dark)
-  }
-  const dish=MeshBuilder.CreateTorus('resistance-dish',{diameter:2.8,thickness:.2,tessellation:35},scene)
-  dish.parent=root;dish.position.set(34,5.7,12);dish.rotation.x=.65;dish.material=ice
-  cyl('resistance-radio-mast',34,4,12,.18,7,steel)
-  // OCCUPIED DETENTION COMPOUND: tangible perimeter, guarded approach and
-  // a barrier that visibly opens after the rescue objective is accomplished.
-  const fence=[] as ReturnType<typeof MeshBuilder.CreateBox>[]
-  for(let i=0;i<8;i++){
-    for(const z of [14.3,25.7])fence.push(box(`prison-wall-${i}-${z}`,39+i*1.65,1.45,z,1.55,2.9,.30,black))
-  }
-  for(let i=0;i<6;i++){
-    fence.push(box(`prison-west-${i}`,39,1.45,15.6+i*1.65,.30,2.9,1.55,black))
-    fence.push(box(`prison-east-${i}`,51,1.45,15.6+i*1.65,.30,2.9,1.55,black))
-  }
-  for(const [x,z] of [[39,14.3],[51,14.3],[39,25.7],[51,25.7]] as const){
-    cyl(`prison-tower-${x}-${z}`,x,2.3,z,.9,4.5,steel)
-    box(`prison-tower-platform-${x}-${z}`,x,4.7,z,2.0,.25,2.0,black)
-  }
-  const prisonGate=box('prison-captive-gate',44.9,1.45,14.3,3.3,2.9,.28,threat)
-  const rescuees=[] as TransformNode[]
-  for(let i=0;i<3;i++){
-    const civilian=createFrontierCivilian(scene,`released-colonist-${i}`,false)
-    civilian.parent=root;civilian.position.set(43.5+i*1.35,0,19.2)
-    rescuees.push(civilian)
-  }
-  // Hostile reinforcements arrive only when the server starts a defense wave.
-  const dropship=new TransformNode('chapter-enemy-dropship',scene)
-  dropship.parent=root
-  const shipBody=MeshBuilder.CreateBox('occupation-dropship-body',{width:3.8,height:.85,depth:6},scene)
-  shipBody.parent=dropship;shipBody.material=black
-  for(const side of [-1,1]){
-    const wing=MeshBuilder.CreateBox(`occupation-wing-${side}`,{width:3.2,height:.19,depth:2.3},scene)
-    wing.parent=dropship;wing.position.set(side*2.9,0,-.65);wing.rotation.z=side*.11;wing.material=steel
-    const engine=MeshBuilder.CreateSphere(`occupation-engine-${side}`,{diameter:.67},scene)
-    engine.parent=dropship;engine.position.set(side*2.25,-.15,-3.1);engine.material=threat
-  }
-  dropship.setEnabled(false)
-  let rescued=false,uplink=false,wave=0,time=0,fly=-1
-  const observer=scene.onBeforeRenderObservable.add(()=>{
-    const dt=Math.min(scene.getEngine().getDeltaTime()/1000,.06)
-    time+=dt
-    activeBeam.visibility=uplink?.09:.4+.22*Math.sin(time*3)
-    ring.visibility=uplink?.25:1
-    for(let i=0;i<fire.length;i++)fire[i].position.y=.6+Math.abs(Math.sin(time*5+i))*.35
-    for(let i=0;i<sootCloud.length;i++){
-      sootCloud[i].position.y=2+i*.91+(time*.25)%2.1
-      sootCloud[i].visibility=0
-    }
-    if(rescued){
-      prisonGate.position.y=Math.max(-1.65,prisonGate.position.y-dt*1.2)
-      for(let i=0;i<rescuees.length;i++){
-        rescuees[i].position.x+=(23.5-rescuees[i].position.x)*dt*.09
-        rescuees[i].position.z+=(13+i*.5-rescuees[i].position.z)*dt*.09
-      }
-    }
-    if(fly>=0){
-      fly+=dt;const t=Math.min(1,fly/12)
-      dropship.position.set(54-32*t,10+3*Math.sin(t*Math.PI),17+7*t)
-      dropship.rotation.y=-1.2
-      if(t===1){fly=-1;dropship.setEnabled(false)}
-    }
-  })
-  return {
-    root,
-    confirmUplink(){uplink=true},
-    confirmRescue(){rescued=true},
-    beginWave(nextWave:number){if(nextWave===wave)return;wave=nextWave;fly=0;dropship.setEnabled(true)},
-    dispose(){scene.onBeforeRenderObservable.remove(observer);root.dispose()},
-  }
 }
 
 type CharacterClass =
@@ -826,7 +308,7 @@ type EnemyAttack = {
   targetY: number
   damage: number
 }
-const SCALE = 0.02
+const SCALE = WORLD_METERS_PER_UNIT
 // Mining has no resource depletion or cooldown; only server-verified distance matters.
 // This matches the server's allowed range exactly.
 const MINE_RANGE = 130
@@ -839,10 +321,8 @@ const sx = (
 const sz = (
   value: number,
 ) => value * SCALE
-const ENVIRONMENT_ROOT =
-  '/New%20folder/drive-download-20261003T222822Z-1-001/Environment/OBJ/'
 // Chapter 1 coordinates match the authoritative server interaction checks.
-// World coordinates are converted to Babylon units with sx/sz (scale 0.02).
+// World coordinates are converted to Babylon units with sx/sz (scale 0.05).
 const KYREVANT_STORY_SITES = [
   { quest: 'recover-flight-log', name: 'HANDWRITTEN NOTE ON A ROCK', x: 500, y: 1100, radius: 155, role: 'terminal' },
   { quest: 'meet-innkeeper', name: 'ELIAS / LAST LIGHT REFUGE', x: 1150, y: 600, radius: 165, role: 'innkeeper' },
@@ -945,6 +425,7 @@ function GameCanvas({
   const [showRules, setShowRules] = useState(false)
   useEffect(() => { combatPaused.current = showArrival || dialogue !== null || showRules }, [showArrival, dialogue, showRules])
   const [mouseStatus, setMouseStatus] = useState<'ready' | 'locked' | 'fallback' | 'released'>('ready')
+  const [equipmentStatus,setEquipmentStatus]=useState<EquipmentStatus>('loading')
   const [marineAssetStatus, setMarineAssetStatus] = useState<'loading' | 'ready' | 'fallback'>('loading')
   const [miningFeedback, setMiningFeedback] = useState('')
   const [miningActive, setMiningActive] = useState(false)
@@ -992,7 +473,7 @@ function GameCanvas({
         },
       )
     const touchDevice = window.matchMedia('(pointer: coarse)').matches
-    if(touchDevice)engine.setHardwareScalingLevel(Math.max(1,window.devicePixelRatio))
+    if(touchDevice)engine.setHardwareScalingLevel(1)
     const scene =
       new Scene(engine)
     scene.clearColor =
@@ -1005,12 +486,12 @@ function GameCanvas({
     scene.fogMode =
       Scene.FOGMODE_EXP2
     scene.fogDensity =
-      0.0032
+      0.0017
     scene.fogColor =
       new Color3(
-        0.083,
-        0.091,
-        0.115,
+        0.37,
+        0.46,
+        0.48,
       )
     // Image-based reflections make metallic helmets and armour read as PBR,
     // rather than appearing as flat-shaded boxes. This does not replace
@@ -1135,34 +616,6 @@ function GameCanvas({
     groundMaterial.bumpTexture = terrainMaps.bump
     groundMaterial.specularColor = new Color3(0.04,0.05,0.055)
     groundMaterial.specularPower = 16
-    const mineralMaterial =
-      material(
-        'mineral-material',
-        new Color3(
-          0.05,
-          0.34,
-          0.95,
-        ),
-        new Color3(
-          0.04,
-          0.18,
-          0.75,
-        ),
-      )
-    const energyMaterial =
-      material(
-        'energy-material',
-        new Color3(
-          0.55,
-          0.08,
-          0.82,
-        ),
-        new Color3(
-          0.45,
-          0.03,
-          0.75,
-        ),
-      )
     const friendlyProjectileMaterial =
       material(
         'friendly-projectile',
@@ -1227,8 +680,9 @@ function GameCanvas({
       40,
       -20,
     )
+    sun.diffuse = new Color3(1,.88,.69)
     sun.intensity =
-      1.32
+      2.0
     const shadowGenerator =
       new ShadowGenerator(
         touchDevice ? 512 : 2048,
@@ -1248,8 +702,7 @@ const glow =
       0.25
     const sky=createAtmosphere(scene)
     sky.position.copyFrom(new Vector3(25,0,16))
-    levelVisuals.push(buildFarLandscape(scene))
-    levelVisuals.push(buildWildFrontier(scene))
+
 
     // Floating atmospheric dust, barely visible until backlit by the sunset.
     // Independent of combat/physics and harmless to multiplayer synchronization.
@@ -1303,7 +756,7 @@ const glow =
     camera.lowerRadiusLimit =
       3.6
     camera.upperRadiusLimit =
-      26
+      65
     camera.lowerBetaLimit =
       0.9
     camera.upperBetaLimit =
@@ -1321,20 +774,21 @@ const glow =
     )
     // A separate camera gives combat a true eye-level first-person perspective.
     // The orbital camera is retained only for the strategy / building view.
+    const localSpawn=currentPlayers.find(player=>player.id===localId)
     const fpsCamera = new FreeCamera(
       'kyrevant-fps-camera',
-      new Vector3(sx(280), 1.65, sz(1240)),
+      new Vector3(sx(localSpawn?.x??280), 1.65, sz(localSpawn?.y??1240)),
       scene,
     )
     fpsCamera.minZ = 0.055
-    fpsCamera.maxZ = 250
+    fpsCamera.maxZ = 1000
     fpsCamera.fov = 1.18
     // Face toward the playable settlement, with the ground in view.
     // Starting with a level horizon and looking toward the map edge
     // made combat mode appear to show only a blue/empty background.
-    fpsCamera.setTarget(new Vector3(10, 1.5, 22))
+    fpsCamera.setTarget(new Vector3(25, 1.6, 55))
     scene.activeCamera = fpsCamera
-    const { root: fpsWeapon, flash: fpsFlash } = createWeaponView(scene, fpsCamera)
+    const { root: fpsWeapon, flash: fpsFlash } = createFieldRifle(scene, fpsCamera, currentPlayers.find(p=>p.id===localId)?.characterClass ?? 'Fighter',setEquipmentStatus)
     // Production-style antialiasing / tonemapping pipeline. The FPS and
     // strategy cameras share it, so mode switching cannot turn the effects off.
     // Bloom stays subtle: bright effects glow, not the entire landscape.
@@ -1347,8 +801,10 @@ const glow =
     renderPipeline.bloomWeight = 0.025
     renderPipeline.bloomKernel = 36
     renderPipeline.imageProcessingEnabled = true
+    renderPipeline.imageProcessing.toneMappingEnabled = true
+    renderPipeline.imageProcessing.toneMappingType = 1
     renderPipeline.imageProcessing.contrast = 1.10
-    renderPipeline.imageProcessing.exposure = 1.08
+    renderPipeline.imageProcessing.exposure = 1.0
 
     let weaponKick = 0
     let flashTime = 0
@@ -1387,8 +843,7 @@ const glow =
       }
     }
 
-    const LOOK_SENSITIVITY = 0.0028
-    const MAX_PITCH = Math.PI * 0.43
+    const inputState=new CombatInput(fpsCamera.rotation.y,fpsCamera.rotation.x)
     let mouseSessionActive = false
     let hasCapturedClick = false
     let cursorReleased = false
@@ -1399,15 +854,10 @@ const glow =
     const isMouseLocked = () => document.pointerLockElement === canvas
 
     const applyLookDelta = (dx: number, dy: number) => {
-      if (commandModeRef.current) return
-      // Ignore extreme deltas after tab-switches or pointer-lock transitions.
-      const deltaX = Math.max(-180, Math.min(180, dx))
-      const deltaY = Math.max(-180, Math.min(180, dy))
-      fpsCamera.rotation.y += deltaX * LOOK_SENSITIVITY
-      fpsCamera.rotation.x = Math.max(
-        -MAX_PITCH,
-        Math.min(MAX_PITCH, fpsCamera.rotation.x + deltaY * LOOK_SENSITIVITY),
-      )
+      if (combatPaused.current || commandModeRef.current) return
+      inputState.look(dx,dy)
+      fpsCamera.rotation.y=inputState.heading
+      fpsCamera.rotation.x=inputState.pitch
     }
 
     const handlePointerLockChange = () => {
@@ -1474,15 +924,29 @@ const glow =
       }
     }
 
+    const resumeMouseLook = () => {
+      if(combatPaused.current || commandModeRef.current)return
+      canvas.focus({preventScroll:true})
+      mouseSessionActive=true;hasCapturedClick=true;cursorReleased=false
+      lastClientX=null;lastClientY=null
+      setMouseStatus(isMouseLocked()?'locked':'fallback')
+    }
+
+    const lookMoveEvent = 'PointerEvent' in window ? 'pointermove' : 'mousemove'
     const handleMouseMove = (event: MouseEvent) => {
-      if (commandModeRef.current || cursorReleased) return
+      if('pointerType' in event && (event as PointerEvent).pointerType==='touch' && event.target!==canvas)return
+      if (combatPaused.current || commandModeRef.current || cursorReleased) { lastClientX=null;lastClientY=null;return }
+      if ((event.target as HTMLElement)?.closest?.('button,aside,[role="dialog"]')) {lastClientX=null;lastClientY=null;return}
       const bounds = canvas.getBoundingClientRect()
       const inside = event.clientX >= bounds.left && event.clientX <= bounds.right &&
         event.clientY >= bounds.top && event.clientY <= bounds.bottom
       if (isMouseLocked()) {
         // With pointer lock the browser reports relative deltas, even when the
         // visible cursor stays at the center of the viewport.
-        applyLookDelta(event.movementX, event.movementY)
+        const dx=event.movementX || (lastClientX===null?0:event.clientX-lastClientX)
+        const dy=event.movementY || (lastClientY===null?0:event.clientY-lastClientY)
+        applyLookDelta(dx,dy)
+        lastClientX=event.clientX;lastClientY=event.clientY
         return
       }
       if (!inside) {
@@ -1490,13 +954,9 @@ const glow =
         lastClientY = null
         return
       }
-      // Any movement over the battlefield can turn the camera. The first click
-      // still requests pointer lock and captures keyboard focus, but previews
-      // that block pointer lock no longer make the player visually frozen.
-      if (!mouseSessionActive) {
-        mouseSessionActive = true
-        setMouseStatus('fallback')
-      }
+      // Look begins only after an intentional click in the world. Menus and
+      // the introduction must never turn the survivor toward the floor.
+      if (!mouseSessionActive || !hasCapturedClick) {lastClientX=null;lastClientY=null;return}
       if (lastClientX !== null && lastClientY !== null) {
         applyLookDelta(event.clientX - lastClientX, event.clientY - lastClientY)
       }
@@ -1534,9 +994,10 @@ const glow =
     }
 
     canvas.addEventListener('mousedown', captureMouse)
+    canvas.addEventListener('click', resumeMouseLook)
     window.addEventListener('mouseup', releaseTrigger)
     window.addEventListener('blur', releaseTrigger)
-    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener(lookMoveEvent, handleMouseMove)
     window.addEventListener('keydown', releaseCursor)
     document.addEventListener('pointerlockchange', handlePointerLockChange)
     document.addEventListener('pointerlockerror', handlePointerLockError)
@@ -1579,6 +1040,8 @@ const glow =
       ground.setVerticesData(VertexBuffer.NormalKind,normals)
     }
 
+    ground.scaling.set(FRONTIER_SCALE,1,FRONTIER_SCALE)
+    ground.position.set(26*FRONTIER_SCALE,0,16*FRONTIER_SCALE)
     ground.material = groundMaterial
     ground.receiveShadows = true
 
@@ -1595,8 +1058,8 @@ const glow =
       () => { if (!scene.isDisposed) ground.material = scannedGround },
       () => { console.warn('Scanned ground unavailable: using built-in terrain texture') },
     )
-    groundAlbedo.uScale = 8
-    groundAlbedo.vScale = 5
+    groundAlbedo.uScale = 22
+    groundAlbedo.vScale = 14
     scannedGround.albedoTexture = groundAlbedo
     const groundNormal = new Texture(
       KYREVANT_GROUND_NORMAL_URL, scene, true, false,
@@ -1641,7 +1104,7 @@ const glow =
       const world = Matrix.Compose(
         new Vector3(scale * (.7 + rubbleRandom()), .28 + rubbleRandom() * .6, scale),
         rotation,
-        new Vector3(x, .016, z),
+        new Vector3(x*FRONTIER_SCALE, .016, z*FRONTIER_SCALE),
       )
       rubbleTransforms.push(...world.toArray())
     }
@@ -1655,436 +1118,27 @@ const glow =
     trailMat.diffuseColor = new Color3(.16,.19,.22)
     trailMat.specularColor = new Color3(.07,.09,.11)
     trail.material = trailMat
+    trail.setEnabled(false)
     /*
       IMPORT HELPERS
     */
-    const objCache = new Map<string, Promise<{
-      positions: number[]
-      normals: number[]
-      uvs: number[]
-      indices: number[]
-    }>>()
-    const atlasTexture = new Texture(
-      '/New%20folder/drive-download-20261003T222822Z-1-001/Atlas.png',
-      scene,
-      false,
-      false,
-    )
-    atlasTexture.hasAlpha = false
-    const spaceKitMaterial = new StandardMaterial(
-      'space-kit-atlas-material',
-      scene,
-    )
-    spaceKitMaterial.diffuseTexture = atlasTexture
-    spaceKitMaterial.diffuseColor = new Color3(1, 1, 1)
-    spaceKitMaterial.specularColor = new Color3(0.12, 0.12, 0.12)
-    spaceKitMaterial.specularPower = 48
-    spaceKitMaterial.backFaceCulling = false
-    function objIndex(raw: string | undefined, length: number) {
-      if (!raw) {
-        return -1
-      }
-      const parsed = Number.parseInt(raw, 10)
-      if (Number.isNaN(parsed) || parsed === 0) {
-        return -1
-      }
-      return parsed > 0
-        ? parsed - 1
-        : length + parsed
-    }
-    async function loadObjSource(
-      rootUrl: string,
-      filename: string,
-    ) {
-      const objUrl = new URL(
-        rootUrl + filename,
-        window.location.origin,
-      ).href
-      const cached = objCache.get(objUrl)
-      if (cached) {
-        return cached
-      }
-      const loading = (async () => {
-        const response = await fetch(objUrl)
-        if (!response.ok) {
-          throw new Error(
-            `Could not load ${filename}: ${response.status} ${response.statusText}`,
-          )
-        }
-        const source = await response.text()
-        const sourcePositions: number[][] = []
-        const sourceNormals: number[][] = []
-        const sourceUvs: number[][] = []
-        const positions: number[] = []
-        const normals: number[] = []
-        const uvs: number[] = []
-        const indices: number[] = []
-        function pushVertex(token: string) {
-          const [vRaw, vtRaw, vnRaw] = token.split('/')
-          const vIndex = objIndex(vRaw, sourcePositions.length)
-          const vtIndex = objIndex(vtRaw, sourceUvs.length)
-          const vnIndex = objIndex(vnRaw, sourceNormals.length)
-          const sourcePosition = sourcePositions[vIndex]
-          if (!sourcePosition) {
-            throw new Error(
-              `Invalid vertex index while reading ${filename}`,
-            )
-          }
-          positions.push(
-            sourcePosition[0],
-            sourcePosition[1],
-            -sourcePosition[2],
-          )
-          const sourceUv = sourceUvs[vtIndex]
-          if (sourceUv) {
-            uvs.push(
-              sourceUv[0],
-              1 - sourceUv[1],
-            )
-          } else {
-            uvs.push(0, 0)
-          }
-          const sourceNormal = sourceNormals[vnIndex]
-          if (sourceNormal) {
-            normals.push(
-              sourceNormal[0],
-              sourceNormal[1],
-              -sourceNormal[2],
-            )
-          } else {
-            normals.push(0, 0, 0)
-          }
-          const index = positions.length / 3 - 1
-          indices.push(index)
-        }
-        for (const rawLine of source.split(/\r?\n/)) {
-          const line = rawLine.trim()
-          if (!line || line.startsWith('#')) {
-            continue
-          }
-          if (line.startsWith('v ')) {
-            const values = line
-              .slice(2)
-              .trim()
-              .split(/\s+/)
-              .map(Number)
-            sourcePositions.push([
-              values[0] ?? 0,
-              values[1] ?? 0,
-              values[2] ?? 0,
-            ])
-            continue
-          }
-          if (line.startsWith('vn ')) {
-            const values = line
-              .slice(3)
-              .trim()
-              .split(/\s+/)
-              .map(Number)
-            sourceNormals.push([
-              values[0] ?? 0,
-              values[1] ?? 0,
-              values[2] ?? 0,
-            ])
-            continue
-          }
-          if (line.startsWith('vt ')) {
-            const values = line
-              .slice(3)
-              .trim()
-              .split(/\s+/)
-              .map(Number)
-            sourceUvs.push([
-              values[0] ?? 0,
-              values[1] ?? 0,
-            ])
-            continue
-          }
-          if (!line.startsWith('f ')) {
-            continue
-          }
-          const face = line
-            .slice(2)
-            .trim()
-            .split(/\s+/)
-          if (face.length < 3) {
-            continue
-          }
-          for (let i = 1; i < face.length - 1; i += 1) {
-            // Flipping Z changes handedness, so reverse triangle winding.
-            pushVertex(face[0])
-            pushVertex(face[i + 1])
-            pushVertex(face[i])
-          }
-        }
-        const hasRealNormals = normals.some(
-          (value) => Math.abs(value) > 0.00001,
-        )
-        if (!hasRealNormals) {
-          const generatedNormals: number[] = []
-          VertexData.ComputeNormals(
-            positions,
-            indices,
-            generatedNormals,
-          )
-          normals.splice(
-            0,
-            normals.length,
-            ...generatedNormals,
-          )
-        }
-        return {
-          positions,
-          normals,
-          uvs,
-          indices,
-        }
-      })()
-      objCache.set(objUrl, loading)
-      return loading
-    }
-    async function importAsset(
-      rootUrl: string,
-      filename: string,
-      position: Vector3,
-      scale: number,
-      rotationY = 0,
-    ) {
-      const geometry = await loadObjSource(
-        rootUrl,
-        filename,
-      )
-      const holder = new TransformNode(
-        `${filename}-${Math.random()}`,
-        scene,
-      )
-      holder.position = position.clone()
-      holder.rotation.y = rotationY
-      holder.scaling.setAll(scale)
-      const mesh = new Mesh(
-        `${filename}-mesh-${Math.random()}`,
-        scene,
-      )
-      const vertexData = new VertexData()
-      vertexData.positions = geometry.positions
-      vertexData.normals = geometry.normals
-      vertexData.uvs = geometry.uvs
-      vertexData.indices = geometry.indices
-      vertexData.applyToMesh(mesh)
-      mesh.material = spaceKitMaterial
-      mesh.parent = holder
-      mesh.receiveShadows = true
-      shadowGenerator.addShadowCaster(mesh)
-      return {
-        holder,
-        result: {
-          meshes: [mesh],
-        },
-      }
-    }
-    /*
-      PLANETARY ENVIRONMENT
-      All assets below come directly
-      from the downloaded pack.
-    */
-    let frontierSetPiece: ReturnType<typeof createFrontierChapterWorld> | null = null
+    let frontierSetPiece: ReturnType<typeof buildFrontierWorld> | null = null
     async function buildEnvironment() {
-      // The landing corridor is intentionally clear so the player can see the settlement.
-      // Larger terrain forms are placed at the edges instead of at eye level in spawn.
-      const placements: Array<[string,number,number,number,number,string]> = [
-        // All of these meshes ship INSIDE the archived project; no CDN required.
-        ['House_Open.obj',23,12,1.28,.17,'civilian'],
-        ['House_Long.obj',26.7,11.2,.91,-.32,'civilian'],
-        ['House_Single.obj',20.1,12,1.08,.15,'civilian'],
-        ['House_Cylinder.obj',24.4,7.6,.84,.26,'civilian'],
-        ['Building_L.obj',21,6.4,.65,-.2,'civilian'],
-        ['Base_Large.obj',34,11,1.3,.5,'resistance'],
-        ['GeodesicDome.obj',33.5,6.5,.8,.2,'resistance'],
-        ['Roof_Radar.obj',34,11,.90,0,'resistance'],
-        ['SolarPanel_Ground.obj',30,16,.85,.3,'resistance'],
-        ['Building_L.obj',44.8,20,.88,.45,'occupation'],
-        ['House_OpenBack.obj',48,19,.86,1.1,'occupation'],
-        ['House_Single.obj',41.4,19,.76,-.65,'occupation'],
-        ['Rock_Large_1.obj',3,5,.47,.10,'rock'],
-        ['Rock_Large_2.obj',12,4,.66,1,'rock'],
-        ['Rock_Large_3.obj',25,3,.71,2,'rock'],
-        ['Rock_Large_1.obj',49,5,.71,1,'rock'],
-        ['Rock_Large_2.obj',4,30,.55,2,'rock'],
-        ['Rock_Large_3.obj',27,31,.64,0,'rock'],
-        ['Rock_Large_1.obj',34,29,.63,1,'rock'],
-        ['Rock_Large_2.obj',50,30,.55,0,'rock'],
-        ['Tree_Spikes_1.obj',19,28,.9,0,'rock'],
-        ['Tree_Spiral_1.obj',29,25,.62,.6,'rock'],
-      ]
-      // Unlike OBJ imports, the chapter world is constructed immediately and
-      // does not depend on external downloads to become visible.
-      if (!scene.isDisposed) {
-        frontierSetPiece = createFrontierChapterWorld(scene)
-        levelVisuals.push(frontierSetPiece.root)
-        if ((room.quests ?? []).some(q=>q.id==='recover-flight-log' && q.complete))
-          frontierSetPiece.confirmUplink()
-        if ((room.quests ?? []).some(q => q.id === 'rescue-civilians' && q.complete)) frontierSetPiece.confirmRescue()
-      }
-      for(const [file,x,z,scale,rot,district] of placements) {
-        try {
-          const imported=await importAsset(ENVIRONMENT_ROOT,file,new Vector3(x,0,z),scale,rot)
-          const color = district==='civilian' ? new Color3(.30,.32,.29)
-            : district==='resistance' ? new Color3(.23,.30,.31)
-            : district==='occupation' ? new Color3(.39,.27,.29)
-            : new Color3(.36,.34,.32)
-          const surface=material(`district-${file}-${x}-${z}`,color)
-          surface.specularColor=new Color3(.12,.15,.17)
-          imported.result.meshes.forEach(mesh=>{mesh.material=surface})
-          levelVisuals.push(imported.holder)
-        } catch (error) { console.warn(`Environment asset unavailable: ${file}`,error) }
-      }
-      levelVisuals.push(createCrashShip(scene,15,27))
-
-      // The old three identical shelter meshes are intentionally NOT built here.
-      // They covered the Last Light Inn, Resistance HQ, and prison compound.
-      // The real chapter geometry is created above in createFrontierChapterWorld.
-      // Quest locations are physical landmarks, not only quest-log text.
-      // The server decides whether each E interaction can complete its objective.
-      const siteAccent = metal(scene, 'npc-friendly-trim', '#8cb6c0', '#0e3944')
-      const terminalShell = metal(scene, 'quest-terminal-shell', '#33444e')
-      const terminalPanel = metal(scene, 'quest-terminal-light', '#4db8d6', '#1d637b')
-      for (const site of KYREVANT_STORY_SITES) {
-        const wx = sx(site.x), wz = sz(site.y)
-        const anchor = new TransformNode(`quest-site-${site.quest}`, scene)
-        anchor.position.set(wx, 0, wz)
-        levelVisuals.push(anchor)
-        chapterOneActors.push(anchor)
-        if (site.quest === 'recover-flight-log') {
-          const rock = MeshBuilder.CreateSphere('note-rock', {diameter: 1.8, segments: 7}, scene)
-          rock.parent = anchor
-          rock.position.y = .5
-          rock.scaling.set(1.2, .65, .9)
-          rock.material = terminalShell
-          const paper = MeshBuilder.CreateGround('weathered-plea', {width: .65, height: .85}, scene)
-          paper.parent = anchor
-          paper.position.set(0, 1.10, 0)
-          paper.rotation.z = -.12
-          const ink = new DynamicTexture('elias-handwritten-note', {width:256,height:256}, scene, false)
-          const context = ink.getContext()
-          context.fillStyle = '#dacba3'
-          context.fillRect(0,0,256,256)
-          context.fillStyle = '#302a22'
-          context.font = 'bold 20px serif'
-          ;['IF ANYONE SEES THIS', '', 'Please come to the', 'LAST LIGHT REFUGE.', '', 'They took our people.', 'Ask for Elias.', '', 'Please hurry.'].forEach((line,i) => context.fillText(line,14,28+i*24))
-          ink.update()
-          const paperMaterial = new StandardMaterial('weathered-note-paper', scene)
-          paperMaterial.diffuseTexture = ink
-          paperMaterial.backFaceCulling = false
-          paper.material = paperMaterial
-        } else if (site.role !== 'terminal') {
-          // Clearly non-hostile humanoid NPCs at the actual interaction positions.
-          const npc = site.role === 'innkeeper' || site.role === 'survivor'
-            ? createFrontierCivilian(scene, `npc-${site.quest}`,site.role === 'innkeeper')
-            : createArmoredSoldier(scene, 'Fighter', `npc-${site.quest}`)
-          npc.parent = anchor
-          npc.rotation.y = -.45
-          npc.scaling.setAll(site.role === 'leader' ? 1 : 0.91)
-          // Colored shoulder marker makes them distinguishable from enemy soldiers.
-          const shoulder = MeshBuilder.CreateBox(`npc-marker-${site.quest}`, {
-            width: .55, height: .09, depth: .15,
-          }, scene)
-          shoulder.parent = anchor
-          shoulder.position.set(0, 1.98, .22)
-          shoulder.material = siteAccent
-          shoulder.isPickable = false
-        } else {
-          const base = MeshBuilder.CreateBox('crash-log-terminal', {
-            width: .92, height: 1.35, depth: .58,
-          }, scene)
-          base.parent = anchor
-          base.position.y = .70
-          base.material = terminalShell
-          const screen = MeshBuilder.CreateBox('crash-log-screen', {
-            width: .76, height: .60, depth: .08,
-          }, scene)
-          screen.parent = anchor
-          screen.position.set(0, 1.04, .33)
-          screen.material = terminalPanel
-          screen.isPickable = false
-        }
-        // HUD/radar are the only navigation labels; no floating world billboards.
-        const ring = MeshBuilder.CreateTorus(`quest-site-ring-${site.quest}`, {
-          diameter: 2.0, thickness: .042, tessellation: 40,
-        }, scene)
-        ring.parent = anchor
-        ring.position.y = .06
-        ring.material = siteAccent
-        ring.isPickable = false
-      }
-
-      const wallMat = material('outpost-concrete',new Color3(.19,.24,.29))
-      wallMat.specularColor = new Color3(.20,.25,.29)
-      const stripeMat=material('outpost-warning',new Color3(.62,.35,.10))
-      const barrier=(x:number,z:number,r=0) => {
-        const b=MeshBuilder.CreateBox(`cover-${x}-${z}`,{width:2.8,height:1.45,depth:.55},scene)
-        b.position.set(x,.73,z);b.rotation.y=r;b.material=wallMat;b.receiveShadows=true
-        const top=MeshBuilder.CreateBox(`cover-stripe-${x}-${z}`,{width:2.83,height:.13,depth:.6},scene)
-        top.position.set(x,1.42,z);top.rotation.y=r;top.material=stripeMat
-      }
-      barrier(13,17,.17)
-      barrier(17,13,-.15)
-      barrier(27,21,.4)
-      barrier(39,21,-.35)
-      const steel=metal(scene,'field-wreckage-steel','#46525d')
-      const soot=metal(scene,'field-wreckage-char','#1b252d')
-      const hazard=metal(scene,'field-hazard-markings','#b07b37')
-      const panelMesh=(name:string,w:number,h:number,d:number,x:number,y:number,z:number,rot=0,mat:StandardMaterial=steel)=> {
-        const m=MeshBuilder.CreateBox(name,{width:w,height:h,depth:d},scene)
-        m.position.set(x,y,z);m.rotation.y=rot;m.material=mat;m.receiveShadows=true
-        return m
-      }
-      // Damaged spaceport and walkable approaches to an occupied settlement.
-      for(const [x,z] of [[15.5,24.5],[17.1,25.8],[12.8,25.8],[19.2,24.2]] as const) {
-        const plate=panelMesh(`crash-deck-${x}-${z}`,1.8,.14,1.2,x,.065,z,(x+z)*.17,soot)
-        plate.rotation.z=.04
-        panelMesh(`crash-marking-${x}-${z}`,1.5,.018,.10,x,.144,z,(x+z)*.17,hazard)
-      }
-      for(let i=0;i<7;i++) {
-        const x=10.2+noise01(i,44)*10
-        const z=20+noise01(i,56)*10
-        const piece=panelMesh(`impact-fragment-${i}`, .15+noise01(i,61)*.5,.06,.7+noise01(i,62)*.6,x,.1,z,noise01(i,66)*6.28,steel)
-        piece.rotation.z=(noise01(i,71)-.5)*.9
-      }
-      const solarFrame=metal(scene,'solar-frame','#2a404f')
-      const solarGlass=metal(scene,'solar-glass','#16384d','#061e2b')
-      for(const [x,z] of [[24,8],[40,17],[46,14]] as const) {
-        panelMesh(`array-frame-${x}`,3,.13,1.5,x,1.25,z,.45,solarFrame)
-        for(let i=-2;i<=2;i++) panelMesh(`array-cell-${x}-${i}`,.52,.04,1.3,x+i*.54,1.35,z,.45,solarGlass)
-        panelMesh(`array-support-${x}`, .14,1.3,.14,x,.67,z,0,solarFrame)
-      }
-
-      // Practical security floodlights instead of glowing carnival beacons.
-      const securityLamp=metal(scene,'security-lamp-frame','#414b54')
-      const lampLens=metal(scene,'security-lamp-lens','#c6d5d7','#526c76')
-      for(const [x,z] of [[17,21],[29,17],[41,15],[48,10]] as const) {
-        const post=MeshBuilder.CreateCylinder(`security-light-post-${x}-${z}`,{
-          diameter:.14,height:3.2,tessellation:20},scene)
-        post.position.set(x,1.60,z);post.material=securityLamp;post.isPickable=false
-        const arm=MeshBuilder.CreateBox(`security-light-arm-${x}-${z}`,{
-          width:.10,height:.10,depth:.9},scene)
-        arm.position.set(x,3.1,z+.38);arm.material=securityLamp;arm.isPickable=false
-        for(const side of [-1,1]) {
-          const fixture=MeshBuilder.CreateBox(`security-fixture-${x}-${z}-${side}`,{
-            width:.46,height:.21,depth:.20},scene)
-          fixture.position.set(x+side*.29,3.05,z+.78);fixture.material=securityLamp
-          const lens=MeshBuilder.CreateBox(`security-lens-${x}-${z}-${side}`,{
-            width:.40,height:.15,depth:.025},scene)
-          lens.position.set(x+side*.29,3.03,z+.897);lens.material=lampLens
-        }
-      }
-      // Short modular stacks function as military storage and combat cover.
-      for(const [x,z] of [[19,19],[26,9],[35,17],[46,23]] as const) {
-        for(let i=0;i<3;i++) {
-          const crate=MeshBuilder.CreateBox(`supply-${x}-${z}-${i}`,{width:1.1,height:1,depth:1.1},scene)
-          crate.position.set(x+(i%2)*1.14,.51+(i===2?1.01:0),z)
-          crate.material=i===2?wallMat:stripeMat
-          crate.receiveShadows=true
-        }
+      frontierSetPiece=buildFrontierWorld(scene,shadowGenerator)
+      levelVisuals.push(frontierSetPiece.root)
+      if((room.quests ?? []).some(q=>q.id==='recover-flight-log' && q.complete))frontierSetPiece.confirmUplink()
+      if((room.quests ?? []).some(q=>q.id==='rescue-civilians' && q.complete))frontierSetPiece.confirmRescue()
+      const actors=KYREVANT_STORY_SITES.filter(site=>site.role!=='terminal')
+      const container=await loadFieldSquad(scene)
+      if(scene.isDisposed){container.dispose();return}
+      for(const site of actors){
+        const npc=new TransformNode(`story-${site.quest}`,scene)
+        npc.position.set(sx(site.x),0,sz(site.y));npc.rotation.y=-.5
+        const copy=container.instantiateModelsToScene(name=>`${site.quest}-${name}`,false,{doNotInstantiate:true})
+        copy.rootNodes.forEach(node=>node.parent=npc)
+        copy.animationGroups.forEach(group=>group.stop());copy.animationGroups.find(group=>/^idle$/i.test(group.name))?.start(true)
+        npc.getChildMeshes().forEach(mesh=>{mesh.isPickable=false;mesh.receiveShadows=true;shadowGenerator.addShadowCaster(mesh)})
+        levelVisuals.push(npc);chapterOneActors.push(npc)
       }
     }
 
@@ -2095,7 +1149,8 @@ const glow =
       if (chapter === 1) return
       chapterLandmark = new TransformNode('chapter-landmark',scene)
       const x = chapter === 2 ? 37 : 39.4, z = chapter === 2 ? 6.4 : 6.6
-      chapterLandmark.position.set(x,0,z)
+      chapterLandmark.position.set(x*FRONTIER_SCALE,0,z*FRONTIER_SCALE)
+      chapterLandmark.scaling.setAll(1.5)
       const stone = metal(scene,'ancient-ruin-stone','#344850')
       const glow = metal(scene,'ancient-ruin-light',chapter===2?'#7ddfda':'#d7ac68',chapter===2?'#327d79':'#805a25')
       chapterRelicLight = glow
@@ -2127,7 +1182,7 @@ const glow =
     const marineLoading = new Set<string>()
     const loadMarines = () => {
       if (!marineContainer) {
-        marineContainer = SceneLoader.LoadAssetContainerAsync(KYREVANT_MARINE_URL, undefined, scene)
+        marineContainer = loadFieldSquad(scene)
           .then(container => {
             if (!scene.isDisposed) setMarineAssetStatus('ready')
             return container
@@ -2174,15 +1229,13 @@ const glow =
         if (!assigned) continue
 
         if (assigned instanceof PBRMaterial) {
-          assigned.albedoTexture = null
-          assigned.albedoColor = uniform.clone()
+          assigned.albedoColor = uniform.scale(2.8)
           assigned.metallic = heavy ? .48 : .34
           assigned.roughness = commander ? .54 : .7
           assigned.emissiveColor = Color3.Black()
           assigned.emissiveTexture = null
         } else if (assigned instanceof StandardMaterial) {
-          assigned.diffuseTexture = null
-          assigned.diffuseColor = uniform.clone()
+          assigned.diffuseColor = uniform.scale(2.8)
           assigned.specularColor = new Color3(.2, .22, .24)
           assigned.emissiveTexture = null
           assigned.emissiveColor = Color3.Black()
@@ -2218,9 +1271,11 @@ const glow =
         shadowGenerator.addShadowCaster(mesh)
       }
       equipOccupationMarine(root, allMeshes, role, id)
-      const idle = copy.animationGroups.find(g => /idle/i.test(g.name))
-      const walk = copy.animationGroups.find(g => /walk/i.test(g.name))
-      const run = copy.animationGroups.find(g => /run/i.test(g.name))
+      void addArmoredHelmet(scene,root).catch(error=>console.warn('Helmet unavailable',error))
+      void addWorldServiceRifle(scene,root).then(gun=>gun?.getChildMeshes().forEach(mesh=>shadowGenerator.addShadowCaster(mesh))).catch(error=>console.warn('Unit weapon unavailable',error))
+      const idle = copy.animationGroups.find(g => /^aim_idle$/i.test(g.name)) ?? copy.animationGroups.find(g => /^idle$/i.test(g.name))
+      const walk = copy.animationGroups.find(g => /^aim_walk$/i.test(g.name)) ?? copy.animationGroups.find(g => /^walk$/i.test(g.name))
+      const run = copy.animationGroups.find(g => /^aim_run$/i.test(g.name)) ?? copy.animationGroups.find(g => /^run$/i.test(g.name))
       for (const group of copy.animationGroups) group.stop()
       idle?.start(true)
       marineAnimations.set(id, { idle, walk, run, moving: false })
@@ -2249,7 +1304,7 @@ const glow =
       // Spawn a working character immediately. Network asset loads may be slow,
       // blocked, or fail; they must never hold up FPS camera/input/game startup.
       if (map.has(id) || scene.isDisposed) return
-      const placeholder = createArmoredSoldier(scene, role, id)
+      const placeholder = new TransformNode(`loading-unit-${id}`,scene)
       placeholder.position.set(sx(x), 0, sz(y))
       const visual: CharacterVisual = {
         root: placeholder,
@@ -2296,197 +1351,14 @@ const glow =
       RESOURCE NODES
     */
     function createResource(node:ResourceNode) {
-      if(resourceVisuals.has(node.id)) return
-      const root=new TransformNode(`node-${node.id}`,scene)
-      root.position.set(sx(node.x),0,sz(node.y))
-      const bodyMaterial=material(`${node.id}-metal`,new Color3(.13,.17,.22))
-      const signal=node.type==='minerals'?mineralMaterial:energyMaterial
-      const pad=MeshBuilder.CreateCylinder(`${node.id}-foundation`,{diameter:1.5,height:.22,tessellation:12},scene)
-      pad.parent=root;pad.position.y=.11;pad.material=bodyMaterial
-      const canister=MeshBuilder.CreateCylinder(`${node.id}-extractor`,{diameter:.65,height:1.13,tessellation:12},scene)
-      canister.parent=root;canister.position.y=.81;canister.material=bodyMaterial
-      const core=MeshBuilder.CreateCylinder(`${node.id}-core`,{diameter:.28,height:.75,tessellation:10},scene)
-      core.parent=root;core.position.y=.85;core.material=signal
-      const ring=MeshBuilder.CreateTorus(`${node.id}-ring`,{diameter:1.05,thickness:.09,tessellation:24},scene)
-      ring.parent=root;ring.position.y=1.29;ring.material=signal
-      for(let i=0;i<4;i++) {
-        const fin=MeshBuilder.CreateBox(`${node.id}-fin-${i}`,{width:.18,height:.62,depth:.28},scene)
-        fin.parent=root;fin.position.set(Math.cos(i*Math.PI/2)*.54,.48,Math.sin(i*Math.PI/2)*.54)
-        fin.rotation.y=i*Math.PI/2;fin.material=bodyMaterial
-      }
-      // Vertical signal marker makes mining locations identifiable in FPS view.
-      const beacon = MeshBuilder.CreateCylinder(
-        `${node.id}-location-beacon`,
-        { height: 3.5, diameter: 0.055, tessellation: 10 },
-        scene,
-      )
-      beacon.parent = root
-      beacon.position.y = 3.0
-      beacon.material = signal
-      beacon.isPickable = false
-      beacon.setEnabled(false)
-      const beaconHead = MeshBuilder.CreateSphere(
-        `${node.id}-location-beacon-head`,
-        { diameter: 0.3, segments: 12 },
-        scene,
-      )
-      beaconHead.parent = root
-      beaconHead.position.y = 4.75
-      beaconHead.material = signal
-      beaconHead.isPickable = false
-      beaconHead.setEnabled(false)
-      root.setEnabled(true)
-      resourceVisuals.set(node.id,root)
+      if(resourceVisuals.has(node.id))return
+      resourceVisuals.set(node.id,buildOreDeposit(scene,node.id,node.type,sx(node.x),sz(node.y)))
     }
-    /*
-      REAL BUILDING ASSETS
-    */
-    async function createBuilding(
-      building: Building,
-    ) {
-      if (
-        buildingVisuals.has(
-          building.id,
-        )
-      ) {
-        return
-      }
-      let filename:
-        string
-      let scale:
-        number
-      switch (
-        building.type
-      ) {
-        case 'Extractor':
-          filename =
-            'GeodesicDome.obj'
-          scale =
-            0.38
-          break
-        case 'Barracks':
-          filename =
-            'Building_L.obj'
-          scale =
-            0.48
-          break
-        case 'PowerCore':
-          filename =
-            'Base_Large.obj'
-          scale =
-            0.38
-          break
-        case 'Turret': {
-          /*
-            The asset pack has no dedicated
-            turret GLTF, so this remains a
-            compact constructed defense
-            instead of inventing another
-            floating weapon.
-          */
-          const root =
-            new TransformNode(
-              `turret-${building.id}`,
-              scene,
-            )
-          root.position.set(
-            sx(building.x),
-            0,
-            sz(building.y),
-          )
-          const base =
-            MeshBuilder.CreateCylinder(
-              `${building.id}-base`,
-              {
-                diameter: 1.2,
-                height: 0.55,
-                tessellation: 12,
-              },
-              scene,
-            )
-          base.position.y =
-            0.275
-          base.parent =
-            root
-          const turretMaterial =
-            new StandardMaterial(
-              `${building.id}-material`,
-              scene,
-            )
-          turretMaterial.diffuseColor =
-            new Color3(
-              0.16,
-              0.18,
-              0.23,
-            )
-          base.material =
-            turretMaterial
-          const head =
-            MeshBuilder.CreateBox(
-              `${building.id}-head`,
-              {
-                width: 0.9,
-                height: 0.35,
-                depth: 0.65,
-              },
-              scene,
-            )
-          head.position.y =
-            0.8
-          head.parent =
-            root
-          head.material =
-            turretMaterial
-          const barrel =
-            MeshBuilder.CreateCylinder(
-              `${building.id}-barrel`,
-              {
-                diameter: 0.08,
-                height: 1.1,
-              },
-              scene,
-            )
-          barrel.rotation.x =
-            Math.PI / 2
-          barrel.position.set(
-            0,
-            0.85,
-            0.72,
-          )
-          barrel.parent =
-            root
-          barrel.material =
-            friendlyProjectileMaterial
-          buildingVisuals.set(
-            building.id,
-            root,
-          )
-          return
-        }
-      }
-      try {
-        const imported =
-          await importAsset(
-            ENVIRONMENT_ROOT,
-            filename,
-            new Vector3(
-              sx(building.x),
-              0,
-              sz(building.y),
-            ),
-            scale,
-            0,
-          )
-        buildingVisuals.set(
-          building.id,
-          imported.holder,
-        )
-      } catch (error) {
-        console.error(
-          'Unable to load constructed building.',
-          error,
-        )
-      }
+    async function createBuilding(building:Building) {
+      if(buildingVisuals.has(building.id))return
+      const visual=buildFieldStructure(scene,building.type,sx(building.x),sz(building.y))
+      visual.getChildMeshes().forEach(mesh=>{shadowGenerator.addShadowCaster(mesh);mesh.receiveShadows=true})
+      buildingVisuals.set(building.id,visual)
     }
     /*
       INITIAL ENTITIES
@@ -2545,7 +1417,7 @@ const glow =
       ) {
         return
       }
-      weaponKick = .12
+      weaponKick = .035
       flashTime = performance.now()+70
       fpsFlash.setEnabled(true)
       const aim =
@@ -2636,13 +1508,7 @@ const glow =
     /*
       CONTROLS
     */
-    const keys = {
-      w: false,
-      a: false,
-      s: false,
-      d: false,
-      space: false,
-    }
+    const keys=inputState.keys
     function keyDown(
       event: KeyboardEvent,
     ) {
@@ -2758,7 +1624,7 @@ const glow =
       setMouseStatus('released')
       scene.activeCamera = camera
       fpsWeapon.setEnabled(false)
-      camera.radius = 18
+      camera.radius = 35
       camera.beta = 0.42
       camera.attachControl(canvas, true)
       playerVisuals.get(localId)?.root.setEnabled(true)
@@ -3451,8 +2317,8 @@ const glow =
           if(chapterRelicLight)chapterRelicLight.emissiveColor=Color3.FromHexString(chapterRelicRecovered?'#347947':activeChapter===2?'#327d79':'#805a25')
         }
         weaponKick=Math.max(0,weaponKick-engine.getDeltaTime()*.00075)
-        fpsWeapon.position.z=.72-weaponKick
-        fpsWeapon.position.y=-.29+Math.sin(performance.now()*.004)*.006
+        fpsWeapon.position.z=.55-weaponKick
+        fpsWeapon.position.y=-.16+Math.sin(performance.now()*.004)*.006
         if(flashTime>0 && performance.now()>flashTime){ fpsFlash.setEnabled(false);flashTime=0 }
         const local =
           currentPlayers.find(
@@ -3469,7 +2335,9 @@ const glow =
           if (commandModeRef.current) {
             camera.setTarget(position)
           } else {
-            fpsCamera.position.copyFrom(position.add(new Vector3(0, 1.65, 0)))
+            const eye=position.add(new Vector3(0,1.65,0))
+            if(Vector3.DistanceSquared(fpsCamera.position,eye)>64)fpsCamera.position.copyFrom(eye)
+            else Vector3.LerpToRef(fpsCamera.position,eye,1-Math.exp(-Math.min(engine.getDeltaTime(),100)*.025),fpsCamera.position)
           }
         }
         // Keep the dusk dome centered on the current camera in every game mode.
@@ -3591,18 +2459,12 @@ const glow =
       showInputDebug(
         `MOUSE: ${isMouseLocked() ? 'LOCKED' : cursorReleased ? 'RELEASED' : 'HOVER/CLICK'} | ` +
         `WASD: ${vertical !== 0 || horizontal !== 0 ? 'MOVING' : now - lastKeyboardAt < 1600 ? 'DETECTED' : 'WAITING'} | ` +
-        `SERVER: ${socket.connected ? 'ONLINE' : 'OFFLINE'}`,
+        `SERVER: ${socket.connected ? 'ONLINE' : 'OFFLINE'} | HEADING: ${fpsCamera.rotation.y.toFixed(3)} | PITCH: ${fpsCamera.rotation.x.toFixed(3)}`,
       )
-      if (commandModeRef.current || !socket.connected) return
+      if (combatPaused.current || commandModeRef.current || !socket.connected) return
       if (now - lastMove < 45) return
       if (vertical === 0 && horizontal === 0) return
-      const yaw = fpsCamera.rotation.y
-      // Match the original FreeCamera forward and right vectors, using the
-      // yaw directly so graphics state cannot make movement undefined.
-      const forward = new Vector3(Math.sin(yaw), 0, Math.cos(yaw))
-      const right = new Vector3(forward.z, 0, -forward.x)
-      const movement = forward.scale(vertical).add(right.scale(horizontal))
-      if (movement.lengthSquared() > 1) movement.normalize()
+      const movement=inputState.movement()
       socket.emit('move-player', {
         roomCode: room.code,
         dx: movement.x,
@@ -3654,7 +2516,8 @@ const glow =
       window.removeEventListener('kyrevant-touch', handleTouch)
       window.removeEventListener('blur', releaseTrigger)
       canvas.removeEventListener('mousedown', captureMouse)
-      window.removeEventListener('mousemove', handleMouseMove)
+      canvas.removeEventListener('click', resumeMouseLook)
+      window.removeEventListener(lookMoveEvent, handleMouseMove)
       window.removeEventListener('keydown', releaseCursor)
       window.removeEventListener('blur', clearMovementKeys)
       document.removeEventListener('pointerlockchange', handlePointerLockChange)
@@ -3867,6 +2730,7 @@ const glow =
       </header>
       <div className="game-window">
         {!showArrival && !dialogue && !commandMode && !victory && <TouchControls />}
+        {!showArrival && (equipmentStatus!=='ready' || marineAssetStatus!=='ready') && <div className="equipment-status" role="status">{equipmentStatus==='loading'||marineAssetStatus==='loading'?'Preparing squad equipment…':'Equipment could not load. Reload to retry.'}</div>}
         {!commandMode && hitAt > 0 && <div key={hitAt} className="combat-hit-marker" aria-hidden="true">×</div>}
         <canvas
           ref={canvasRef}
@@ -3991,7 +2855,7 @@ const glow =
           <p><b>Objective:</b> Work together to read the plea near the wreck, find Elias, defeat patrols, talk to settlers, rescue captives, mine minerals, build defenses, survive three waves and defeat the commander.</p>
           <p><b>Controls:</b> WASD move · Mouse aim/look · Hold left click / SPACE fire · E talk/interact · M mine · Q special ability · ESC release cursor. Build in Command Mode.</p>
           <p><b>Win:</b> Complete all the mission objectives. Shared resources and buildings belong to your squad; both players share the victory.</p>
-          <button type="button" onClick={() => setShowRules(false)}>RETURN TO GAME</button>
+          <p><a href="/credits.html" target="_blank" rel="noreferrer" style={{color:'#9ccad5'}}>Art and asset credits</a></p><button type="button" onClick={() => setShowRules(false)}>RETURN TO GAME</button>
         </div>}
         {dialogue && <div role="dialog" aria-label={dialogue.title} style={{position:'absolute',
           zIndex:42,top:'14%',left:'50%',transform:'translateX(-50%)',

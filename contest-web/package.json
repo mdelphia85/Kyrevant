@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "start": "tsx server/server.ts",
     "test": "node scripts/test-local.mjs",
-    "test:campaign": "node scripts/test-local.mjs --campaign"
+    "test:campaign": "node scripts/test-local.mjs --campaign",
+    "test:input": "node --import tsx scripts/input-test.mjs"
   },
   "dependencies": {
     "@babylonjs/core": "^9.29.0",

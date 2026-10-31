@@ -1,5 +1,6 @@
+import { loadFieldSquad } from './DetailedAssets'
 import { useEffect, useRef } from 'react'
-import { Color3, Color4, Engine, Scene, FreeCamera, Vector3, MeshBuilder, StandardMaterial, PointLight, HemisphericLight, TransformNode, DynamicTexture, GlowLayer, SceneLoader } from '@babylonjs/core'
+import { Color3, Color4, Engine, Scene, FreeCamera, Vector3, MeshBuilder, StandardMaterial, PointLight, HemisphericLight, TransformNode, DynamicTexture, GlowLayer } from '@babylonjs/core'
 
 // An actual 3D troop compartment viewed through the survivor's eyes.
 export default function TransportSequence({stage}:{stage:number}) {
@@ -50,13 +51,13 @@ export default function TransportSequence({stage}:{stage:number}) {
     const light=new PointLight('compartment-light',new Vector3(0,2.9,-1),scene);light.diffuse=new Color3(.55,.8,1);light.intensity=1.6;light.range=18
     const alarm=new PointLight('emergency-light',new Vector3(0,2.5,7),scene);alarm.diffuse=new Color3(1,.14,.03);alarm.range=17;alarm.intensity=0
     box('warning-beacon',0,3.1,8.9,.7,.12,.15,red)
-    void SceneLoader.LoadAssetContainerAsync('/assets/','unit-marine.glb',scene).then(container=>{
+    void loadFieldSquad(scene).then(container=>{
       if(scene.isDisposed){container.dispose();return}
       for(const [index,x] of [-1.9,1.9].entries()){
         const crew=container.instantiateModelsToScene(name=>`transport-crew-${index}-${name}`,false,{doNotInstantiate:true})
         const member=new TransformNode(`unit-member-${index}`,scene);member.parent=cabin;member.position.set(x,0,5.5);member.rotation.y=index===0 ? .7 : -.7
         crew.rootNodes.forEach(node=>node.parent=member)
-        crew.animationGroups.forEach(group=>group.stop());crew.animationGroups.find(group=>/idle/i.test(group.name))?.start(true)
+        crew.animationGroups.forEach(group=>group.stop());crew.animationGroups.find(group=>/^idle$/i.test(group.name))?.start(true)
       }
     }).catch(()=>{/* The cabin remains usable if the optional crew model cannot load. */})
     const glow=new GlowLayer('cabin-bloom',scene);glow.intensity=.35

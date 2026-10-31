@@ -52,3 +52,11 @@ Free Render instances sleep after 15 idle minutes, and the next load can take ab
 ## Technology and assets
 
 React, TypeScript, Babylon.js, Express, and Socket.IO. Marine, ground maps, and reflection lighting are bundled locally. See [CREDITS.md](CREDITS.md). This is an original game inspired by first-person sci-fi combat, party adventures, and resource/base strategy.
+
+### Frontier graphics and controls revision
+
+The October 30 frontier art rebuild replaces the prototype OBJ settlement and primitive weapon/character shapes with locally bundled textured first-person weapons, gloved arms, tactical characters, sci-fi helmets, scanned cover/equipment, and original wreck/outpost geometry. The map now spans 130 × 80 metres. Fighter, Monk, Cleric, and Wizard use distinct weapon models. Resource deposits, extractor drills, barracks, turrets, and power cores remain shared multiplayer objects.
+
+The combat screen stays clear: compact visor bars/radar, one objective, and opt-in journal/construction. Mouse-look updates the same independent input controller that reads held WASD keys. Camera movement interpolates authoritative server positions. Browser pointer-lock has a click-to-resume fallback; Escape frees the cursor. Touch aiming remains independent of the movement pad.
+
+Run `npm run test:input` to verify held movement while turning, diagonal speed, and input clearing. Art/model sources and license links are in `CREDITS.md` and accessible in-game through How to Play.

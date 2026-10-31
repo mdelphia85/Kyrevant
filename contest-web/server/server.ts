@@ -1,3 +1,4 @@
+import { WORLD_METERS_PER_UNIT, PLAYER_HIT_RADIUS_UNITS } from '../src/world.ts'
 import { species, characterClasses, type Species } from '../src/characters.ts'
 import express from 'express'
 import path from 'node:path'
@@ -1001,7 +1002,7 @@ function startLevel(
   )
 }
 // CONTEST CHAPTER: THE FALL — server-authoritative narrative and encounter state.
-// Same world coordinates as GameCanvas, scale 0.02. The server validates both
+// Same world coordinates as GameCanvas, scale 0.05. The server validates both
 // distance and story conditions; client button clicks cannot award rewards alone.
 const chapterOneSites = {
   flightLog: { x: 500, y: 1100, radius: 155 },
@@ -1727,8 +1728,8 @@ io.on(
         const speed =
           player.characterClass ===
           'Monk'
-            ? 18
-            : 14
+            ? 10
+            : 7
         player.x =
           Math.max(
             30,
@@ -1856,10 +1857,10 @@ io.on(
             aim.y *
               direction.y
           if (
-            dot <= 0 || Math.sqrt(Math.max(0, 1-dot*dot)) * targetDistance > 32 ||
+            dot <= 0 || Math.sqrt(Math.max(0, 1-dot*dot)) * targetDistance > PLAYER_HIT_RADIUS_UNITS ||
             (data.aimElevation !== undefined && (() => {
               const elevation = Math.max(-.999,Math.min(.999,data.aimElevation))
-              const hitHeight = 1.65 + elevation / Math.sqrt(1-elevation*elevation) * targetDistance * .02
+              const hitHeight = 1.65 + elevation / Math.sqrt(1-elevation*elevation) * targetDistance * WORLD_METERS_PER_UNIT
               return hitHeight < .15 || hitHeight > 2.65
             })())
           ) {
@@ -2753,7 +2754,7 @@ setInterval(() => {
   )
 }, 300)
 const distDirectory = path.resolve(process.cwd(), 'dist')
-app.get('/healthz', (_req, res) => res.status(200).json({ ok: true, game: 'KYREVANT', multiplayer: true, build: '2026-10-30.2' }))
+app.get('/healthz', (_req, res) => res.status(200).json({ ok: true, game: 'KYREVANT', multiplayer: true, build: '2026-10-30.3' }))
 if (existsSync(path.join(distDirectory, 'index.html'))) {
   app.use(express.static(distDirectory, { maxAge: 3600000 }))
   app.get('/', (_req, res) => res.sendFile(path.join(distDirectory, 'index.html')))
