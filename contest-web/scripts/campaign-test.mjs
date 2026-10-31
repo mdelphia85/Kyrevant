@@ -56,7 +56,7 @@ async function fight(filter=()=>true){
   }
 }
 async function mine(type,target){const node=state.resourceNodes.find(n=>n.type===type);await travel(node.x,node.y);while(state.economy[type]<target){assert.equal((await ack(host,'mine-resource',{roomCode:code,nodeId:node.id})).success,true);await sleep(20)}}
-async function build(type,x,y){await travel(x,y);const size=state.buildings.length;host.emit('build-structure',{roomCode:code,type,x,y});await until(()=>state.buildings.length>size,`Build ${type}`)}
+async function build(type,x,y){await travel(x,y);const size=state.buildings.length,confirmed=once(host,'build-confirmed');host.emit('build-structure',{roomCode:code,type,x,y});assert.equal((await confirmed).type,type);await until(()=>state.buildings.length>size,`Build ${type}`)}
 try{
   await Promise.all([host,guest].map(async s=>{const promise=once(s,'connect');s.connect();await promise}))
   const created=await ack(host,'create-room','Campaign Tester');code=created.roomCode;assert.ok(created.success)
@@ -67,6 +67,7 @@ try{
   const mission=once(host,'mission-started')
   await ack(host,'set-ready',code);await ack(guest,'set-ready',code);state=await mission
   assert.equal(player(host).maxHealth,140);assert.equal(player(guest).maxShield,135)
+  const rejected=once(host,'build-denied');host.emit('build-structure',{roomCode:code,type:'Extractor',x:-100,y:1000});assert.match(await rejected,/boundary/);await synchronize();assert.equal(state.buildings.length,0)
   const original=player(host).x
   host.emit('move-player',{roomCode:code,dx:NaN,dy:0})
   host.emit('build-structure',{roomCode:code,type:'Invalid',x:0,y:0})

@@ -5,7 +5,7 @@ export type EquipmentStatus='loading'|'ready'|'failed'
 const models:Record<string,string>={Fighter:'rifle-m4.glb',Monk:'rifle-recon.glb',Cleric:'rifle-support.glb',Wizard:'rifle-marksman.glb'}
 
 export function createFieldRifle(scene:Scene,camera:FreeCamera,role='Fighter',onStatus?:(status:EquipmentStatus)=>void){
-  const root=new TransformNode(`${role}-service-weapon`,scene);root.parent=camera;root.position.set(.23,-.16,.55);root.rotation.y=-.015
+  const root=new TransformNode(`${role}-service-weapon`,scene);root.parent=camera;root.position.set(.23,-.20,.60);root.rotation.y=-.015
   const flash=MeshBuilder.CreateSphere('hot-propellant',{diameter:.17,segments:8},scene)
   flash.parent=root;flash.position.set(0,.055,.42);flash.scaling.set(.65,.65,2.2);flash.renderingGroupId=2
   const material=new StandardMaterial('propellant-light',scene);material.emissiveColor=role==='Wizard'?new Color3(.55,.5,1):new Color3(1,.65,.22);material.alpha=.8
@@ -13,7 +13,7 @@ export function createFieldRifle(scene:Scene,camera:FreeCamera,role='Fighter',on
   onStatus?.('loading')
   void SceneLoader.LoadAssetContainerAsync('/assets/detailed/',models[role]??models.Fighter,scene).then(container=>{
     if(scene.isDisposed){container.dispose();return}
-    const authored=new TransformNode('textured-weapon-and-gloved-hands',scene);authored.parent=root;authored.rotation.y=Math.PI;authored.scaling.setAll(.5)
+    const authored=new TransformNode('textured-weapon-and-gloved-hands',scene);authored.parent=root;authored.rotation.y=Math.PI;authored.scaling.setAll(.46)
     const copy=container.instantiateModelsToScene(name=>`view-${name}`,false,{doNotInstantiate:true})
     copy.rootNodes.forEach(node=>{node.parent=authored;node.setEnabled(true)})
     copy.animationGroups.forEach(group=>group.stop())

@@ -1,3 +1,4 @@
+import { BUILD_COSTS, placementProblem } from '../src/buildRules.ts'
 import { WORLD_METERS_PER_UNIT, PLAYER_HIT_RADIUS_UNITS, frontierHeight, frontierLineClear } from '../src/world.ts'
 import { species, characterClasses, type Species } from '../src/characters.ts'
 import express from 'express'
@@ -694,28 +695,7 @@ function attackProfile(
 function buildingCost(
   type: BuildingType,
 ) {
-  switch (type) {
-    case 'Extractor':
-      return {
-        minerals: 60,
-        energy: 0,
-      }
-    case 'Barracks':
-      return {
-        minerals: 120,
-        energy: 20,
-      }
-    case 'Turret':
-      return {
-        minerals: 90,
-        energy: 20,
-      }
-    case 'PowerCore':
-      return {
-        minerals: 80,
-        energy: 60,
-      }
-  }
+  return BUILD_COSTS[type]
 }
 // Guard level changes so the 300ms simulation loop cannot schedule duplicates.
 const chapterTransitions = new Set<string>()
@@ -2065,74 +2045,11 @@ io.on(
         ) {
           return
         }
-        const x =
-          Math.max(
-            150,
-            Math.min(
-              WORLD_WIDTH - 150,
-              data.x,
-            ),
-          )
-        const y =
-          Math.max(
-            150,
-            Math.min(
-              WORLD_HEIGHT - 150,
-              data.y,
-            ),
-          )
-        /*
-          Players can only construct
-          reasonably close to themselves.
-        */
-        if (
-          distance(
-            player.x,
-            player.y,
-            x,
-            y,
-          ) > 700
-        ) {
-          socket.emit(
-            'build-denied',
-            'Build location is too far away.',
-          )
-          return
-        }
-        const overlaps =
-          room.buildings.some(
-            (building) =>
-              distance(
-                building.x,
-                building.y,
-                x,
-                y,
-              ) < 140,
-          )
-        if (overlaps) {
-          socket.emit(
-            'build-denied',
-            'Another structure occupies that area.',
-          )
-          return
-        }
         if (room.phase !== 'mission' || player.downed) return
-        const cost =
-          buildingCost(
-            data.type,
-          )
-        if (
-          room.economy.minerals <
-            cost.minerals ||
-          room.economy.energy <
-            cost.energy
-        ) {
-          socket.emit(
-            'build-denied',
-            'Insufficient resources.',
-          )
-          return
-        }
+        const {x,y}=data
+        const problem=placementProblem(data.type,x,y,player,room.economy,room.buildings)
+        if(problem){socket.emit('build-denied',problem);return}
+        const cost=buildingCost(data.type)
         room.economy.minerals -=
           cost.minerals
         room.economy.energy -=
@@ -2153,6 +2070,7 @@ io.on(
         room.buildings.push(
           building,
         )
+        socket.emit('build-confirmed',{id:building.id,type:building.type})
         io.to(room.code).emit(
           'building-state',
           room.buildings,
@@ -2777,7 +2695,7 @@ setInterval(() => {
   )
 }, 300)
 const distDirectory = path.resolve(process.cwd(), 'dist')
-app.get('/healthz', (_req, res) => res.status(200).json({ ok: true, game: 'KYREVANT', multiplayer: true, build: '2026-10-31.1' }))
+app.get('/healthz', (_req, res) => res.status(200).json({ ok: true, game: 'KYREVANT', multiplayer: true, build: '2026-10-31.2' }))
 if (existsSync(path.join(distDirectory, 'index.html'))) {
   app.use(express.static(distDirectory, { maxAge: 3600000 }))
   app.get('/', (_req, res) => res.sendFile(path.join(distDirectory, 'index.html')))

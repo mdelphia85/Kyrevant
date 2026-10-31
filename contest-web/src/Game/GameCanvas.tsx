@@ -1,3 +1,5 @@
+import {placementProblem} from '../buildRules'
+import {WeaponMotion} from './WeaponMotion'
 import {
   useEffect,
   useRef,
@@ -418,6 +420,9 @@ function GameCanvas({
   const soundRef = useRef<CombatAudio | null>(null)
   useEffect(() => { if(soundRef.current) soundRef.current.enabled=soundEnabled },[soundEnabled])
   const [hitAt, setHitAt] = useState(0)
+  const [hurtAt,setHurtAt]=useState(0)
+  const [aiming,setAiming]=useState(false)
+  const [placementStatus,setPlacementStatus]=useState('Move the preview to choose a location.')
   const [showArrival, setShowArrival] = useState(()=>sessionStorage.getItem(`kyrevant-intro-${room.code}`)!=='seen'&&(room.level??1)===1&&room.phase!=='victory')
   const [showBuildMenu, setShowBuildMenu] = useState(false)
   const combatPaused = useRef(true)
@@ -555,6 +560,7 @@ function GameCanvas({
       window.clearTimeout(miningMessageTimer)
       miningMessageTimer = window.setTimeout(() => setMiningFeedback(''), 2600)
     }
+    let currentEconomy={...(room.economy??{minerals:0,energy:0})}
     let currentBuildings =
       [
         ...(room.buildings ??
@@ -616,6 +622,7 @@ function GameCanvas({
         ),
       )
     const terrainMaps = createPlanetTerrainTextures(scene)
+    terrainMaps.diffuse.uScale=38;terrainMaps.diffuse.vScale=32;terrainMaps.bump.uScale=38;terrainMaps.bump.vScale=32
     groundMaterial.diffuseTexture = terrainMaps.diffuse
     groundMaterial.bumpTexture = terrainMaps.bump
     groundMaterial.specularColor = new Color3(0.04,0.05,0.055)
@@ -810,7 +817,9 @@ const glow =
     renderPipeline.imageProcessing.contrast = 1.10
     renderPipeline.imageProcessing.exposure = 1.0
 
-    let weaponKick = 0
+    const weaponMotion=new WeaponMotion()
+    const defeatedAt=new Map<string,number>()
+    const hitReactions=new Map<string,number>()
     let flashTime = 0
 
     // UNIFIED FPS INPUT
@@ -859,7 +868,8 @@ const glow =
 
     const applyLookDelta = (dx: number, dy: number) => {
       if (combatPaused.current || commandModeRef.current) return
-      inputState.look(dx,dy)
+      weaponMotion.look(dx,dy)
+      inputState.look(dx*(1-weaponMotion.aim*.4),dy*(1-weaponMotion.aim*.4))
       fpsCamera.rotation.y=inputState.heading
       fpsCamera.rotation.x=inputState.pitch
     }
@@ -897,9 +907,10 @@ const glow =
 
     let triggerHeld = false
     let lastLocalShot = 0
-    const releaseTrigger = () => { triggerHeld = false }
+    const releaseTrigger = (event?:MouseEvent|Event) => { if(!event||!(event instanceof MouseEvent)||event.button===0)triggerHeld=false;if(!event||!(event instanceof MouseEvent)||event.button===2){weaponMotion.release();setAiming(false)} }
     const captureMouse = (event: MouseEvent) => {
       if (combatPaused.current) return
+      if(event.button===2&&!commandModeRef.current){event.preventDefault();weaponMotion.aimed=true;setAiming(true);canvas.focus({preventScroll:true});return}
       if (event.button === 0) triggerHeld = true
       if (commandModeRef.current || event.button !== 0) return
       canvas.focus({ preventScroll: true })
@@ -975,6 +986,7 @@ const glow =
         return
       }
       if (event.code === 'Escape' && !commandModeRef.current) {
+        weaponMotion.release();setAiming(false)
         // Do not clear/disable the movement keys. Escape is NOT a movement mode.
         mouseSessionActive = false
         hasCapturedClick = false
@@ -997,6 +1009,8 @@ const glow =
       }
     }
 
+    const preventContext=(event:Event)=>event.preventDefault()
+    canvas.addEventListener('contextmenu',preventContext)
     canvas.addEventListener('mousedown', captureMouse)
     canvas.addEventListener('click', resumeMouseLook)
     window.addEventListener('mouseup', releaseTrigger)
@@ -1013,9 +1027,9 @@ const glow =
       MeshBuilder.CreateGround(
         'kyrevant-ground',
         {
-          width: 55,
-          height: 35,
-          subdivisions: 128,
+          width: 140,
+          height: 112,
+          subdivisions: 256,
           updatable: true,
         },
         scene,
@@ -1066,8 +1080,8 @@ const glow =
       () => { if (!scene.isDisposed) ground.material = scannedGround },
       () => { console.warn('Scanned ground unavailable: using built-in terrain texture') },
     )
-    groundAlbedo.uScale = 15
-    groundAlbedo.vScale = 10
+    groundAlbedo.uScale = 38
+    groundAlbedo.vScale = 32
     scannedGround.albedoTexture = groundAlbedo
     const groundNormal = new Texture(
       KYREVANT_GROUND_NORMAL_URL, scene, true, false,
@@ -1417,18 +1431,19 @@ const glow =
       }
     }
     function fire() {
-      if (combatPaused.current || !socket.connected) return
-      const role = currentPlayers.find(p => p.id === localId)?.characterClass
+      if (combatPaused.current || !socket.connected || commandModeRef.current) return
+      const shooter=currentPlayers.find(p=>p.id===localId);if(!shooter||shooter.downed)return
+      const role=shooter.characterClass
       const cadence = role === 'Monk' ? 200 : role === 'Cleric' ? 360 : role === 'Wizard' ? 600 : 250
       if (performance.now() - lastLocalShot < cadence) return
       lastLocalShot = performance.now()
-      audio.play('shot')
+      audio.play('shot',role??'Fighter')
       if (
         commandModeRef.current
       ) {
         return
       }
-      weaponKick = .035
+      weaponMotion.shoot(role==='Wizard'?1.55:role==='Monk'?.7:1)
       flashTime = performance.now()+70
       fpsFlash.setEnabled(true)
       const aim =
@@ -1531,6 +1546,9 @@ const glow =
       switch (
         event.code
       ) {
+        case 'KeyZ':
+          if(!event.repeat&&!commandModeRef.current){event.preventDefault();weaponMotion.aimed=!weaponMotion.aimed;setAiming(weaponMotion.aimed)}
+          break
         case 'KeyW':
           keys.w = true
           break
@@ -1609,6 +1627,7 @@ const glow =
       const detail = (event as CustomEvent).detail
       if (combatPaused.current || commandModeRef.current) return
       if (typeof detail.lookX === 'number') applyLookDelta(detail.lookX * 1.8, detail.lookY * 1.8)
+      if(detail.action==='aim'){weaponMotion.aimed=!weaponMotion.aimed;setAiming(weaponMotion.aimed)}
       if (detail.key === 'fire') { triggerHeld = detail.down; if (detail.down) fire() }
       if (['w','a','s','d'].includes(detail.key)) keys[detail.key as 'w'|'a'|'s'|'d'] = Boolean(detail.down)
       if (detail.action === 'interact') interactRef.current?.()
@@ -1622,7 +1641,23 @@ const glow =
       vs.
       STARCRAFT COMMAND VIEW
     */
+    let placementPreview:TransformNode|null=null
+    const previewMaterial=new StandardMaterial('construction-hologram',scene);previewMaterial.alpha=.42;previewMaterial.disableLighting=true
+    let placementTarget:Vector3|null=null,placementPending=false,lastPlacementCheck=0,lastPlacementMessage='',serverBuildError='',placementErrorUntil=0
+    let placementTimer:ReturnType<typeof setTimeout>|undefined
+    const placementMessage=(message:string)=>{if(message!==lastPlacementMessage){lastPlacementMessage=message;setPlacementStatus(message)}}
+    function updatePlacement(){
+      if(!commandModeRef.current||!placementPreview)return
+      const pick=scene.pick(scene.pointerX,scene.pointerY,mesh=>mesh.name==='kyrevant-ground')
+      const player=currentPlayers.find(p=>p.id===localId),type=selectedBuildingRef.current
+      if(!pick?.pickedPoint||!player||!type){placementTarget=null;placementPreview.setEnabled(false);placementMessage('Move over the terrain to place the structure.');return}
+      placementTarget=pick.pickedPoint.clone();placementPreview.position.copyFrom(placementTarget);placementPreview.position.y+=.04;placementPreview.setEnabled(true)
+      const problem=performance.now()<placementErrorUntil?serverBuildError:placementProblem(type,placementTarget.x/SCALE,placementTarget.z/SCALE,player,currentEconomy,currentBuildings)
+      previewMaterial.emissiveColor=problem?new Color3(.9,.18,.12):new Color3(.12,.85,.58)
+      placementMessage(placementPending?'Constructing…':problem??'Ready — click or tap to construct.')
+    }
     function enterCommandMode() {
+      weaponMotion.release();setAiming(false);triggerHeld=false
       commandModeRef.current = true
       if (document.pointerLockElement === canvas) {
         document.exitPointerLock()
@@ -1642,7 +1677,10 @@ const glow =
       setCommandMode(true)
     }
     function exitCommandMode() {
+      triggerHeld=false;weaponMotion.release();setAiming(false)
       commandModeRef.current = false
+      if(placementTimer)clearTimeout(placementTimer)
+      placementPreview?.dispose();placementPreview=null;placementTarget=null;placementPending=false;placementErrorUntil=0
       selectedBuildingRef.current = null
       mouseSessionActive = false
       hasCapturedClick = false
@@ -1669,7 +1707,13 @@ const glow =
         selectedBuildingRef.current =
           customEvent.detail
             .building
-        enterCommandMode()
+        placementPreview?.dispose()
+        placementPreview=buildFieldStructure(scene,customEvent.detail.building,0,0)
+        const oldMaterials=new Set(placementPreview.getChildMeshes().map(mesh=>mesh.material))
+        placementPreview.getChildMeshes().forEach(mesh=>{mesh.material=previewMaterial;mesh.isPickable=false})
+        oldMaterials.forEach(material=>material?.dispose(false,false))
+        placementPreview.setEnabled(false);placementPending=false
+        enterCommandMode();updatePlacement()
       }
     const cancelCommandEvent =
       () => {
@@ -1704,36 +1748,17 @@ const glow =
         if (!building) {
           return
         }
-        const pick =
-          scene.pick(
-            scene.pointerX,
-            scene.pointerY,
-            (mesh) =>
-              mesh.name ===
-              'kyrevant-ground',
-          )
-        if (
-          !pick?.hit ||
-          !pick.pickedPoint
-        ) {
-          return
-        }
-        socket.emit(
-          'build-structure',
-          {
-            roomCode:
-              room.code,
-            type:
-              building,
-            x:
-              pick.pickedPoint.x /
-              SCALE,
-            y:
-              pick.pickedPoint.z /
-              SCALE,
-          },
-        )
-        exitCommandMode()
+        if(placementPending)return
+        if(!socket.connected){placementMessage('Connection lost — reconnect before constructing.');return}
+        updatePlacement()
+        const player=currentPlayers.find(p=>p.id===localId)
+        if(!placementTarget||!player)return
+        const x=placementTarget.x/SCALE,y=placementTarget.z/SCALE
+        const problem=placementProblem(building,x,y,player,currentEconomy,currentBuildings)
+        if(problem){placementMessage(problem);return}
+        placementErrorUntil=0;placementPending=true;placementMessage('Constructing…')
+        placementTimer=setTimeout(()=>{placementPending=false;placementErrorUntil=performance.now()+2500;serverBuildError='No confirmation received. Check the connection and try again.';placementMessage(serverBuildError)},12000)
+        socket.emit('build-structure',{roomCode:room.code,type:building,x,y})
       },
     )
     /*
@@ -1829,6 +1854,8 @@ const glow =
     function updatePlayers(
       updated: Player[],
     ) {
+      const previous=currentPlayers.find(player=>player.id===localId),next=updated.find(player=>player.id===localId)
+      if(previous&&next&&(next.health??0)+(next.shield??0)<(previous.health??0)+(previous.shield??0))setHurtAt(performance.now())
       currentPlayers =
         [...updated]
       setPlayers(updated)
@@ -1887,6 +1914,8 @@ const glow =
     function updateEnemies(
       updated: Enemy[],
     ) {
+      for(const enemy of updated)if(enemy.alive)defeatedAt.delete(enemy.id)
+      for(const enemy of updated)if(!enemy.alive&&currentEnemies.some(old=>old.id===enemy.id&&old.alive)){defeatedAt.set(enemy.id,performance.now());const animation=marineAnimations.get(enemy.id);if(animation){animation.idle?.stop();animation.walk?.stop();animation.run?.stop();animation.moving=false}}
       currentEnemies =
         [...updated]
       setEnemies(updated)
@@ -1918,11 +1947,8 @@ const glow =
               .subtract(
                 oldPosition,
               )
-          setMarineMoving(enemy.id, movement.length() > 0.002)
-          if (
-            movement.length() >
-            0.005
-          ) {
+          setMarineMoving(enemy.id, enemy.alive&&Math.hypot(movement.x,movement.z)>0.002)
+          if (enemy.alive&&Math.hypot(movement.x,movement.z)>0.005) {
             visual.root.rotation.y =
               Math.atan2(
                 movement.x,
@@ -1930,9 +1956,7 @@ const glow =
               ) +
               Math.PI
           }
-          visual.root.setEnabled(
-            enemy.alive,
-          )
+          visual.root.setEnabled(enemy.alive||performance.now()-(defeatedAt.get(enemy.id)??-Infinity)<650)
         },
       )
     }
@@ -1946,6 +1970,7 @@ const glow =
           ResourceNode[]
       },
     ) {
+      currentEconomy={...data.economy}
       currentNodes =
         [...data.nodes]
       setEconomy(
@@ -1993,6 +2018,7 @@ const glow =
     function handleAttack(
       result: AttackResult,
     ) {
+      if(result.targetId)hitReactions.set(result.targetId,performance.now())
       if (result.playerId === localId && result.targetId) { setHitAt(performance.now());audio.play('hit') }
       const attacker =
         playerVisuals.get(
@@ -2140,6 +2166,7 @@ const glow =
           energy: 0,
         },
       )
+      currentEconomy={...(nextRoom.economy??{minerals:0,energy:0})};defeatedAt.clear();hitReactions.clear();exitCommandMode()
       currentPlayers =
         [...nextRoom.players]
       currentEnemies =
@@ -2261,20 +2288,12 @@ const glow =
       'building-state',
       updateBuildings,
     )
-    socket.on(
-      'quest-state',
-      (
-        updated:
-          QuestObjective[],
-      ) => {
-        setQuests(updated)
-        chapterRelicRecovered = updated.some(q => (q.id === 'recover-artifact' || q.id === 'activate-citadel-core') && q.complete)
-        if (updated.some(q => q.id === 'recover-flight-log' && q.complete))
-          frontierSetPiece?.confirmUplink()
-        if (updated.some(q => q.id === 'rescue-civilians' && q.complete))
-          frontierSetPiece?.confirmRescue()
-      },
-    )
+    const onQuestState=(updated:QuestObjective[])=>{
+      setQuests(updated);chapterRelicRecovered=updated.some(q=>(q.id==='recover-artifact'||q.id==='activate-citadel-core')&&q.complete)
+      if(updated.some(q=>q.id==='recover-flight-log'&&q.complete))frontierSetPiece?.confirmUplink()
+      if(updated.some(q=>q.id==='rescue-civilians'&&q.complete))frontierSetPiece?.confirmRescue()
+    }
+    socket.on('quest-state',onQuestState)
     socket.on(
       'attack-result',
       handleAttack,
@@ -2287,43 +2306,12 @@ const glow =
       'level-started',
       handleLevelStarted,
     )
-    socket.on(
-      'story-event',
-      (message: string) => {
-        setAnnouncement(
-          message,
-        )
-      },
-    )
-    socket.on(
-      'level-complete',
-      (
-        completedLevel:
-          number,
-      ) => {
-        setAnnouncement(
-          `LEVEL ${completedLevel} COMPLETE`,
-        )
-      },
-    )
-    socket.on(
-      'build-denied',
-      (message: string) => {
-        setAnnouncement(
-          message,
-        )
-        exitCommandMode()
-      },
-    )
-    socket.on(
-      'game-won',
-      () => {
-        setVictory(true)
-        setAnnouncement(
-          'KYREVANT',
-        )
-      },
-    )
+    const onStory=(message:string)=>setAnnouncement(message)
+    const onLevelComplete=(level:number)=>setAnnouncement(`LEVEL ${level} COMPLETE`)
+    const onBuildDenied=(message:string)=>{if(placementTimer)clearTimeout(placementTimer);placementPending=false;serverBuildError=message;placementErrorUntil=performance.now()+2500;placementMessage(message);setAnnouncement(message)}
+    const onBuildConfirmed=()=>{if(placementPending){exitCommandMode();setProgressMessage('Structure online — shared squad resources updated.')}}
+    const onWon=()=>{setVictory(true);setAnnouncement('KYREVANT')}
+    socket.on('story-event',onStory);socket.on('level-complete',onLevelComplete);socket.on('build-confirmed',onBuildConfirmed);socket.on('build-denied',onBuildDenied);socket.on('game-won',onWon)
     /*
       GAME LOOP
     */
@@ -2333,6 +2321,7 @@ const glow =
     let lastNearestInfo = ''
     scene.onBeforeRenderObservable.add(
       () => {
+        if(commandModeRef.current&&performance.now()-lastPlacementCheck>75){lastPlacementCheck=performance.now();updatePlacement()}
         if (triggerHeld && !commandModeRef.current && !combatPaused.current) fire()
         if (combatPaused.current || !socket.connected) { clearMovementKeys();triggerHeld=false }
         if(chapterRelic && !chapterRelic.isDisposed()) {
@@ -2340,9 +2329,11 @@ const glow =
           chapterRelic.position.y=1.9+Math.sin(performance.now()*.0015)*.13
           if(chapterRelicLight)chapterRelicLight.emissiveColor=Color3.FromHexString(chapterRelicRecovered?'#347947':activeChapter===2?'#327d79':'#805a25')
         }
-        weaponKick=Math.max(0,weaponKick-engine.getDeltaTime()*.00075)
-        fpsWeapon.position.z=.55-weaponKick
-        fpsWeapon.position.y=-.16+Math.sin(performance.now()*.004)*.006
+        if((combatPaused.current||commandModeRef.current||!socket.connected)&&weaponMotion.aimed){weaponMotion.release();setAiming(false)}
+        const motion=weaponMotion.update(engine.getDeltaTime()/1000,Boolean(inputState.keys.w||inputState.keys.a||inputState.keys.s||inputState.keys.d))
+        fpsWeapon.position.set(motion.x,motion.y,motion.z);fpsWeapon.rotation.x=motion.pitch;fpsWeapon.rotation.z=motion.roll;fpsCamera.fov=motion.fov
+        for(const [id,time] of defeatedAt){const visual=enemyVisuals.get(id);if(!visual)continue;const t=Math.min(1,(performance.now()-time)/600);visual.root.rotation.z=t*Math.PI*.48;visual.root.position.y=frontierHeight(visual.root.position.x,visual.root.position.z)-t*.22;if(t===1)visual.root.setEnabled(false)}
+        for(const [id,time] of hitReactions){const visual=enemyVisuals.get(id);if(visual){const intensity=Math.max(0,1-(performance.now()-time)/150);for(const mesh of visual.root.getChildMeshes())if(mesh.material instanceof PBRMaterial&&mesh.material.name.startsWith('occupation-uniform-'))mesh.material.emissiveColor.set(intensity*.18,intensity*.055,intensity*.015)}if(performance.now()-time>150)hitReactions.delete(id)}
         if(flashTime>0 && performance.now()>flashTime){ fpsFlash.setEnabled(false);flashTime=0 }
         const local =
           currentPlayers.find(
@@ -2539,6 +2530,7 @@ const glow =
       window.removeEventListener('mouseup', releaseTrigger)
       window.removeEventListener('kyrevant-touch', handleTouch)
       window.removeEventListener('blur', releaseTrigger)
+      canvas.removeEventListener('contextmenu',preventContext)
       canvas.removeEventListener('mousedown', captureMouse)
       canvas.removeEventListener('click', resumeMouseLook)
       window.removeEventListener(lookMoveEvent, handleMouseMove)
@@ -2600,6 +2592,9 @@ const glow =
           visual.dispose()
         },
       )
+      socket.off('quest-state',onQuestState);socket.off('story-event',onStory);socket.off('level-complete',onLevelComplete);socket.off('build-confirmed',onBuildConfirmed);socket.off('build-denied',onBuildDenied);socket.off('game-won',onWon)
+      if(placementTimer)clearTimeout(placementTimer)
+      placementPreview?.dispose();previewMaterial.dispose()
       audio.dispose()
       soundRef.current=null
       chapterLandmark?.dispose()
@@ -2754,8 +2749,9 @@ const glow =
         </div>
       </header>
       <div className="game-window">
-        {!showArrival && !dialogue && !commandMode && !victory && <TouchControls />}
+        {!showArrival && !dialogue && !commandMode && !victory && <TouchControls aiming={aiming}/>}
         {!showArrival && (equipmentStatus!=='ready' || marineAssetStatus!=='ready') && <div className="equipment-status" role="status">{equipmentStatus==='loading'||marineAssetStatus==='loading'?'Preparing squad equipment…':'Equipment could not load. Reload to retry.'}</div>}
+        {!commandMode&&hurtAt>0&&<div key={hurtAt} className="combat-damage-vignette" aria-hidden="true"/>}
         {!commandMode && hitAt > 0 && <div key={hitAt} className="combat-hit-marker" aria-hidden="true">×</div>}
         <canvas
           ref={canvasRef}
@@ -2775,7 +2771,7 @@ const glow =
           </div>
         )}
         {!commandMode && (
-          <div className="crosshair">
+          <div className={`crosshair ${aiming?'crosshair-aimed':''}`}>
             <span />
             <span />
           </div>
@@ -2878,7 +2874,7 @@ const glow =
           <h2 style={{margin:'0 0 10px'}}>KYREVANT · CO-OP RULES</h2>
           <p>Two to four players join the same five-character room code from separate devices. The host starts once both players join; everyone selects a class and presses READY.</p>
           <p><b>Objective:</b> Work together to read the plea near the wreck, find Elias, defeat patrols, talk to settlers, rescue captives, mine minerals, build defenses, survive three waves and defeat the commander.</p>
-          <p><b>Controls:</b> WASD move · Mouse aim/look · Hold left click / SPACE fire · E talk/interact · M mine · Q special ability · ESC release cursor. Build in Command Mode.</p>
+          <p><b>Controls:</b> WASD move · Mouse look · Hold right click / Z toggle focus aim · Hold left click / SPACE fire · E talk/interact · M mine · Q special ability · ESC release cursor. Build in Command Mode.</p>
           <p><b>Win:</b> Complete all the mission objectives. Shared resources and buildings belong to your squad; both players share the victory.</p>
           <p><a href="/credits.html" target="_blank" rel="noreferrer" style={{color:'#9ccad5'}}>Art and asset credits</a></p><button type="button" onClick={() => setShowRules(false)}>RETURN TO GAME</button> {onLeave&&<button type="button" onClick={onLeave}>LEAVE SQUAD</button>}
           <p style={{fontSize:12,color:'#a1bac5'}}>Refresh or briefly reconnect to return to this character. Disconnected slots are held for ten minutes. Leaving the squad releases your character.</p>
@@ -2978,6 +2974,7 @@ const glow =
               PLACE{' '}
               {selectedBuilding}
             </small>
+            <p className="placement-feedback" role="status">{placementStatus}</p>
             <button
               type="button"
               onClick={
@@ -3002,7 +2999,7 @@ const glow =
             <p>The militia is defeated. The captives are free. Elias lights the refuge beacon for your unit's return.</p>
             <p>You came here as survivors. You leave as the people who gave Kyrevant a future.</p>
             {room.players.find(p => p.id === localId)?.isHost && <button type="button" onClick={() => socket.emit('restart-campaign',room.code)}>Play again</button>}
-            <button type="button" onClick={() => window.location.assign(window.location.pathname)}>Return to title</button>
+            <button type="button" onClick={() => onLeave?onLeave():window.location.assign(window.location.pathname)}>Return to title</button>
           </div>
         )}
       </div>

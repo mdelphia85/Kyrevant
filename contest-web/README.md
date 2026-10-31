@@ -47,7 +47,7 @@ The build checks client and server TypeScript. The smoke test checks two-client 
 
 See [DEPLOY.md](DEPLOY.md). `render.yaml` configures one free Render Node web service serving both the built client and multiplayer server. In the GitHub Unity repository, this browser edition is placed under `contest-web/`.
 
-Free Render instances sleep after 15 idle minutes, and the next load can take about a minute. Rooms live in memory and reset when the server restarts. Brief network interruptions recover for up to 45 seconds. No database is needed for an active match.
+Free Render instances sleep after 15 idle minutes, and the next load can take about a minute. Rooms live in memory and reset when the server restarts. Socket.IO transport recovery lasts 45 seconds; a private saved-character token also restores the same character after refresh or disconnects of up to ten minutes. No database is needed for an active match.
 
 ## Technology and assets
 
@@ -60,3 +60,8 @@ The October 30 frontier art rebuild replaces the prototype OBJ settlement and pr
 The combat screen stays clear: compact visor bars/radar, one objective, and opt-in journal/construction. Mouse-look updates the same independent input controller that reads held WASD keys. Camera movement interpolates authoritative server positions. Browser pointer-lock has a click-to-resume fallback; Escape frees the cursor. Touch aiming remains independent of the movement pad.
 
 Run `npm run test:input` to verify held movement while turning, diagonal speed, and input clearing. Art/model sources and license links are in `CREDITS.md` and accessible in-game through How to Play.
+
+## Combat and construction controls
+Hold right click to focus aim, press Z to toggle it, or tap AIM on touch devices. Weapon recoil/sway and hit feedback are visual; authoritative damage remains on the server. Construction shows a green/red structure preview and the reason placement is unavailable. A build returns to combat after the server confirms construction; rejection keeps the preview open. The shared placement rules enforce cost, range, map boundaries and spacing.
+
+Run `npm run test:combat` for motion and placement checks, `npm run test:recovery` for refresh/session recovery, and `npm run test:campaign` for the full multiplayer campaign.
