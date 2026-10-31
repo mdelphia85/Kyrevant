@@ -1,4 +1,4 @@
-import { WORLD_METERS_PER_UNIT, PLAYER_HIT_RADIUS_UNITS } from '../src/world.ts'
+import { WORLD_METERS_PER_UNIT, PLAYER_HIT_RADIUS_UNITS, frontierHeight, frontierLineClear } from '../src/world.ts'
 import { species, characterClasses, type Species } from '../src/characters.ts'
 import express from 'express'
 import path from 'node:path'
@@ -75,6 +75,7 @@ type Building = {
   y: number
   health: number
   maxHealth: number
+  lastVisualAt?: number
 }
 type QuestObjective = {
   id: string
@@ -122,6 +123,7 @@ type Room = {
     raidLaunched?: boolean
     watchLaunched?: boolean
     defenseAuthorized?: boolean
+    rescueTactic?: 'assault' | 'sabotage' | 'relief'
   }
 }
 const WORLD_WIDTH = 2600
@@ -1126,7 +1128,11 @@ function chapterDialogue(room: Room, player: Player, site: ChapterSite) {
       display('ELIAS · REFUGE KEEPER','THE MISSING COLONISTS',[
         'I am Elias. This used to be a refuge for everyone on Kyrevant. Then the Ashfall militia turned on the people they were sent to protect.',
         'They dragged our families to the eastern detention compound. My brother Jonah is among them. Will your unit help bring them home?',
-      ],[{id:'ask_missing',label:'We will help. Where are they holding your people?'},{id:'ask_history',label:'Who controls this planet?'},leave])
+        'The prison runs on a salvaged shield relay. Their patrols answer to the same command signal as our old defenses. There may be more than one way to bring your people home.',
+      ],[{id:'ask_missing',label:'Lead an assault. Give us the route to the prisoners.'},
+        ...(room.players.some(p=>p.characterClass==='Wizard'||p.characterClass==='Monk')?[{id:'plan_sabotage',label:'[Wizard / Monk] Find a maintenance route and sabotage their relay.'}]:[]),
+        ...(room.players.some(p=>p.characterClass==='Cleric')?[{id:'plan_relief',label:'[Cleric] Prepare medical supplies before we move.'}]:[]),
+        {id:'ask_history',label:'Who are the people of Kyrevant?'},leave])
     } else display('ELIAS · REFUGE KEEPER','THE LAST LIGHT REFUGE',[
       'The captives are east of here inside the guarded detention compound. Their guards control the approach.',
     ],[leave])
@@ -1201,8 +1207,9 @@ function handleChapterChoice(room: Room, player: Player,
   if (input.choice === 'leave') { player.dialogueUntil = 0; return }
   if (input.choice === 'ask_history' && (here === 'innkeeper' || here === 'resistance')) {
     notifyPlayer(player,here,'FRONTIER RECORDS','A PLANET UNDER OCCUPATION',[
-      'The planet was settled quietly until an unauthorized military faction seized its technology and communications.',
-      'The resistance leader believes the occupation needs an ancient control system beneath the Citadel.',
+      'Human wayfarers, Aelari starborn and Stoneborn deep-clans built this settlement together. Our arguments were about harvests and mining rights, until Marshal Veyr turned the Ashfall militia against us.',
+      'The militia found an ancient machine beneath the Citadel. Veyr believes it can command the planet’s buried defenses. He took our engineers and their families to force them to wake it.',
+      'Elias stayed behind to guide survivors. Captain Vale deserted the militia rather than obey the arrests. Neither can hold the refuge without your unit.',
     ],[{id:'leave',label:'Continue'}])
     return
   }
@@ -1214,21 +1221,25 @@ function handleChapterChoice(room: Room, player: Player,
     reply = 'NOTE RECOVERED · Find Elias at the Last Light Refuge, beyond the ridge. Look for the amber lamp.'
     accepted = true
   }
-  if (here === 'innkeeper' && input.choice === 'ask_missing' &&
+  if (here === 'innkeeper' && ['ask_missing','plan_sabotage','plan_relief'].includes(input.choice) &&
       f.crashLogRecovered && !f.innkeeperContacted) {
+    if(input.choice==='plan_sabotage'&&!room.players.some(p=>p.characterClass==='Wizard'||p.characterClass==='Monk'))return
+    if(input.choice==='plan_relief'&&!room.players.some(p=>p.characterClass==='Cleric'))return
     f.innkeeperContacted = true
+    f.rescueTactic=input.choice==='plan_sabotage'?'sabotage':input.choice==='plan_relief'?'relief':'assault'
     rewardSquad(room, 40)
     spawnOutpostWatch(room)
-    reply = 'NEW INTEL · Two armed guards hold captives at Shelter Charlie. Eliminate them and release the prisoners.'
+    if(f.rescueTactic==='sabotage')for(const guard of room.enemies.filter(e=>['l1-outpost-1','l1-outpost-2'].includes(e.id))){guard.health=Math.round(guard.health*.65);guard.maxHealth=guard.health}
+    reply = f.rescueTactic==='sabotage'?'RELAY SABOTAGED · Your specialist bypassed the maintenance lock. The prison guards are weakened. Reach the eastern compound and bring the captives home.':f.rescueTactic==='relief'?'RELIEF PLAN · Elias has prepared medical reserves. Free the eastern compound; the rescued engineers will bring extra energy supplies to your base.':'ASSAULT PLAN · Follow the ridge east. Two armed guards hold captives at the detention compound. Clear the guards and release the prisoners.'
     accepted = true
   }
   if (here === 'missing' && input.choice === 'free' &&
       f.innkeeperContacted && !f.civiliansRescued &&
       !room.enemies.some(e => e.alive && ['l1-outpost-1','l1-outpost-2'].includes(e.id))) {
     f.civiliansRescued = true
-    grantResources(room, 50, 40)
+    grantResources(room, 50, f.rescueTactic==='relief'?70:40)
     rewardSquad(room, 80)
-    reply = 'SURVIVORS SAVED · +50 minerals, +40 energy, +80 XP. Captain Vale is waiting at Shelter Bravo.'
+    reply = `SURVIVORS SAVED · +50 minerals, +${f.rescueTactic==='relief'?70:40} energy, +80 XP. Jonah is safe. Captain Vale is waiting at the resistance headquarters.`
     accepted = true
   }
   if (here === 'resistance' && input.choice === 'alliance' &&
@@ -1858,11 +1869,13 @@ io.on(
               direction.y
           if (
             dot <= 0 || Math.sqrt(Math.max(0, 1-dot*dot)) * targetDistance > PLAYER_HIT_RADIUS_UNITS ||
-            (data.aimElevation !== undefined && (() => {
-              const elevation = Math.max(-.999,Math.min(.999,data.aimElevation))
-              const hitHeight = 1.65 + elevation / Math.sqrt(1-elevation*elevation) * targetDistance * WORLD_METERS_PER_UNIT
-              return hitHeight < .15 || hitHeight > 2.65
-            })())
+            (() => {
+              const px=player.x*WORLD_METERS_PER_UNIT,pz=player.y*WORLD_METERS_PER_UNIT,ex=enemy.x*WORLD_METERS_PER_UNIT,ez=enemy.y*WORLD_METERS_PER_UNIT
+              const sourceY=frontierHeight(px,pz)+1.65,targetGround=frontierHeight(ex,ez)
+              const elevation=Math.max(-.999,Math.min(.999,data.aimElevation??0))
+              const hitY=data.aimElevation===undefined?targetGround+1.2:sourceY+elevation/Math.sqrt(1-elevation*elevation)*targetDistance*WORLD_METERS_PER_UNIT
+              return hitY-targetGround<.15||hitY-targetGround>2.65||!frontierLineClear(px,sourceY,pz,ex,hitY,ez)
+            })()
           ) {
             continue
           }
@@ -2614,7 +2627,7 @@ setInterval(() => {
                 : 280
           if (
             best >
-            attackRange
+            attackRange || !frontierLineClear(enemy.x*WORLD_METERS_PER_UNIT,frontierHeight(enemy.x*WORLD_METERS_PER_UNIT,enemy.y*WORLD_METERS_PER_UNIT)+1.15,enemy.y*WORLD_METERS_PER_UNIT,target.x*WORLD_METERS_PER_UNIT,frontierHeight(target.x*WORLD_METERS_PER_UNIT,target.y*WORLD_METERS_PER_UNIT)+1.2,target.y*WORLD_METERS_PER_UNIT)
           ) {
             const direction =
               normalize(
@@ -2694,7 +2707,7 @@ setInterval(() => {
               room.enemies
                 .filter(
                   (enemy) =>
-                    enemy.alive,
+                    enemy.alive && frontierLineClear(turret.x*.05,frontierHeight(turret.x*.05,turret.y*.05)+1.3,turret.y*.05,enemy.x*.05,frontierHeight(enemy.x*.05,enemy.y*.05)+1.2,enemy.y*.05),
                 )
                 .sort(
                   (a, b) =>
@@ -2724,6 +2737,7 @@ setInterval(() => {
             ) {
               return
             }
+            if(now-(turret.lastVisualAt??0)>220){turret.lastVisualAt=now;io.to(room.code).emit('turret-attack',{enemyId:turret.id,targetId:target.id,startX:turret.x,startY:turret.y,targetX:target.x,targetY:target.y,damage:5})}
             target.health =
               Math.max(
                 0,
@@ -2754,7 +2768,7 @@ setInterval(() => {
   )
 }, 300)
 const distDirectory = path.resolve(process.cwd(), 'dist')
-app.get('/healthz', (_req, res) => res.status(200).json({ ok: true, game: 'KYREVANT', multiplayer: true, build: '2026-10-30.4' }))
+app.get('/healthz', (_req, res) => res.status(200).json({ ok: true, game: 'KYREVANT', multiplayer: true, build: '2026-10-30.5' }))
 if (existsSync(path.join(distDirectory, 'index.html'))) {
   app.use(express.static(distDirectory, { maxAge: 3600000 }))
   app.get('/', (_req, res) => res.sendFile(path.join(distDirectory, 'index.html')))

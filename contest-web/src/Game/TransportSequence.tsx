@@ -1,6 +1,6 @@
 import { loadFieldSquad } from './DetailedAssets'
 import { useEffect, useRef } from 'react'
-import { Color3, Color4, Engine, Scene, FreeCamera, Vector3, MeshBuilder, StandardMaterial, PointLight, HemisphericLight, TransformNode, DynamicTexture, GlowLayer } from '@babylonjs/core'
+import { Color3, Color4, Engine, Scene, FreeCamera, Vector3, MeshBuilder, StandardMaterial, PointLight, HemisphericLight, Texture, TransformNode, DynamicTexture, GlowLayer } from '@babylonjs/core'
 
 // An actual 3D troop compartment viewed through the survivor's eyes.
 export default function TransportSequence({stage}:{stage:number}) {
@@ -17,6 +17,8 @@ export default function TransportSequence({stage}:{stage:number}) {
     const cabin=new TransformNode('transport-cabin',scene)
     const mat=(name:string,color:string,emission?:string)=>{const m=new StandardMaterial(name,scene);m.diffuseColor=Color3.FromHexString(color);m.specularColor=new Color3(.35,.4,.45);if(emission)m.emissiveColor=Color3.FromHexString(emission);return m}
     const hull=mat('ceramic-armor','#34434b'),seam=mat('recessed-metal','#101a22'),trim=mat('titanium-ribs','#62737a'),seat=mat('restraint-padding','#24382e'),blue=mat('cabin-light','#8ae5ff','#4599c0'),red=mat('warning-light','#e77542','#b63211')
+    hull.diffuseTexture=new Texture('/assets/detailed/hull-metal-color.webp',scene);hull.bumpTexture=new Texture('/assets/detailed/hull-metal-normal.webp',scene)
+    trim.diffuseTexture=hull.diffuseTexture;trim.bumpTexture=hull.bumpTexture
     const box=(name:string,x:number,y:number,z:number,w:number,h:number,d:number,m:StandardMaterial)=>{const mesh=MeshBuilder.CreateBox(name,{width:w,height:h,depth:d},scene);mesh.position.set(x,y,z);mesh.material=m;mesh.parent=cabin;return mesh}
     box('deck',0,-.12,1,6,.24,19,hull);box('ceiling',0,3.6,1,6,.2,19,seam)
     for(const side of [-1,1]){
@@ -45,6 +47,8 @@ export default function TransportSequence({stage}:{stage:number}) {
     const planet=MeshBuilder.CreateSphere('alien-world',{diameter:14,segments:40},scene);planet.position.set(5,3,28);planet.material=mat('ocean-world','#335e69','#123441')
     const cloud=MeshBuilder.CreateTorus('orbital-cloud-band',{diameter:14.3,thickness:.12,tessellation:90},scene);cloud.position.copyFrom(planet.position);cloud.rotation.z=.5;cloud.material=blue
     const asteroid=MeshBuilder.CreateIcoSphere('incoming-asteroid',{radius:1.1,subdivisions:2,flat:true},scene);asteroid.position.set(-14,8,24);asteroid.material=mat('asteroid-basalt','#625348')
+    ;(asteroid.material as StandardMaterial).diffuseTexture=new Texture('/assets/rock-ground-color.webp',scene)
+    ;(asteroid.material as StandardMaterial).bumpTexture=new Texture('/assets/rock-ground-normal.webp',scene)
     const stars=mat('stars','#c9e5ff','#c9e5ff')
     for(let i=0;i<90;i++){const star=MeshBuilder.CreateSphere('distant-star',{diameter:.035+(i%3)*.015,segments:3},scene);star.position.set(Math.sin(i*127.1)*35,Math.cos(i*53.2)*20,38+Math.sin(i)*8);star.material=stars}
     const ambient=new HemisphericLight('ship-fill',new Vector3(0,1,0),scene);ambient.intensity=.42

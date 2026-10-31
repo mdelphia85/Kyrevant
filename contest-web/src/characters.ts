@@ -5,10 +5,10 @@ export const species = [
 ] as const
 
 export const characterClasses = [
-  { name: 'Fighter', description: 'Assault rifle · resilient frontline · fragmentation grenade' },
-  { name: 'Monk', description: 'Rapid carbine · fast movement · close-range dash strike' },
-  { name: 'Cleric', description: 'Support rifle · healing pulse · revive nearby allies' },
-  { name: 'Wizard', description: 'Heavy energy rifle · long range · arcane blast' },
+  { name: 'Fighter', description: 'K-7 induction rifle · resilient frontline · fragmentation grenade' },
+  { name: 'Monk', description: 'K-3 induction carbine · fast movement · close-range dash strike' },
+  { name: 'Cleric', description: 'S-4 support rifle · healing pulse · revive nearby allies' },
+  { name: 'Wizard', description: 'A-9 energy lance · long range · arcane blast' },
 ] as const
 export type Species = typeof species[number]['name']
 export type CharacterClass = typeof characterClasses[number]['name']

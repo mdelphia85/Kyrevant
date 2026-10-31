@@ -1,4 +1,5 @@
-import { Color3, Color4, DynamicTexture, Mesh, MeshBuilder, ParticleSystem, PBRMaterial, Scene, SceneLoader, ShadowGenerator, StandardMaterial, Texture, TransformNode, Vector3, VertexBuffer, VertexData } from '@babylonjs/core'
+import {frontierHeight} from '../world'
+import { Color3, Color4, DynamicTexture, Matrix, Mesh, MeshBuilder, ParticleSystem, PBRMaterial, Quaternion, Scene, SceneLoader, ShadowGenerator, StandardMaterial, Texture, TransformNode, Vector3, VertexBuffer, VertexData } from '@babylonjs/core'
 import { armorPanel, beamBetween, fieldMetal } from './FieldGeometry'
 
 // Base mission coordinates are kept intact; the frontier now spans 130 x 80 metres.
@@ -15,7 +16,7 @@ export function buildFrontierWorld(scene:Scene,shadows:ShadowGenerator){
   for(const material of [steel,green,rust]){material.albedoTexture=hullColor;material.bumpTexture=hullNormal;material.roughness=.65}
   const wallColor=new Texture('/assets/detailed/concrete-color.webp',scene);wallColor.uScale=3;wallColor.vScale=2
   const wallNormal=new Texture('/assets/detailed/concrete-normal.webp',scene);wallNormal.uScale=3;wallNormal.vScale=2
-  cream.albedoTexture=wallColor;cream.bumpTexture=wallNormal;cream.albedoColor=new Color3(.76,.79,.72);cream.roughness=.95
+  cream.albedoTexture=wallColor;cream.bumpTexture=wallNormal;cream.albedoColor=new Color3(.40,.52,.54);cream.roughness=.82
   const rubber=fieldMetal(scene,'seals','#171e1c',.05,.95)
   const glass=new PBRMaterial('glazed-viewport',scene);glass.albedoColor=new Color3(.11,.21,.22);glass.metallic=.65;glass.roughness=.14
   const lamp=fieldMetal(scene,'warm-practical-lights','#c9b38a',.2,.45);lamp.emissiveColor=new Color3(.45,.3,.12)
@@ -29,7 +30,7 @@ export function buildFrontierWorld(scene:Scene,shadows:ShadowGenerator){
     const positions=m.getVerticesData(VertexBuffer.PositionKind)!,indices=m.getIndices()!
     for(let n=0;n<positions.length;n+=3){const x=positions[n],y=positions[n+1],z=positions[n+2];const v=1+Math.sin(x*8+z*7)*.10+Math.cos(y*11+x*3)*.08;positions[n]*=v;positions[n+1]*=v;positions[n+2]*=v}
     m.updateVerticesData(VertexBuffer.PositionKind,positions);const normals:number[]=[];VertexData.ComputeNormals(positions,Array.from(indices),normals);m.updateVerticesData(VertexBuffer.NormalKind,normals)
-    m.parent=root;m.position.set(x,Math.max(.05,h*.25),z);m.scaling.set(w,h,d);m.material=soil;m.rotation.y=rand(x+z)*6;m.isPickable=false;m.receiveShadows=true;shadows.addShadowCaster(m);return m
+    m.parent=root;m.position.set(x,frontierHeight(x,z)+Math.max(.05,h*.25),z);m.scaling.set(w,h,d);m.material=soil;m.rotation.y=rand(x+z)*6;m.isPickable=false;m.receiveShadows=true;shadows.addShadowCaster(m);return m
   }
   // The transport is behind and to the left of the player, leaving the note approach clear.
   const wreck=new TransformNode('crashed-unit-transport',scene);wreck.parent=root;wreck.position=at(4.4,28.7);wreck.rotation.set(.08,.42,-.13)
@@ -73,7 +74,9 @@ export function buildFrontierWorld(scene:Scene,shadows:ShadowGenerator){
         panel(`${name}-window-frame-${side}-${k}`,.27,1.45,1.5,x+side*(width/2+.025),2.4,z-depth*.3+k*depth*.3,dark)
         panel(`${name}-window-glass-${side}-${k}`,.29,1.12,1.22,x+side*(width/2+.035),2.4,z-depth*.3+k*depth*.3,glass)
       }
-      const roof=panel(`${name}-sloped-roof-${side}`,width*.53,.25,depth+.7,x+side*width*.25,4.45,z,green);roof.rotation.z=side*.13
+      const roof=panel(`${name}-armored-roof-${side}`,width*.53,.42,depth+.7,x+side*width*.25,4.35,z,steel);roof.rotation.z=side*.045
+      const brace=panel(`${name}-angled-front-buttress-${side}`,.55,4.4,.85,x+side*(width/2+.3),2.3,z+depth/2-.4,dark);brace.rotation.z=side*.18
+      panel(`${name}-roof-edge-trim-${side}`,.15,.08,depth+.5,x+side*(width/2+.2),4.55,z,lamp)
       panel(`${name}-corner-frame-${side}`,.30,4.1,.32,x+side*width/2,2.4,z+depth/2,steel)
       panel(`${name}-entry-light-${side}`,.12,.85,.15,x+side*1.2,2.7,z+depth/2+.15,lamp)
     }
@@ -113,7 +116,8 @@ export function buildFrontierWorld(scene:Scene,shadows:ShadowGenerator){
   }
   routeTexture.hasAlpha=true;routeTexture.update()
   const routeMaterial=new StandardMaterial('ground-dust-and-ruts',scene);routeMaterial.diffuseTexture=routeTexture;routeMaterial.useAlphaFromDiffuseTexture=true;routeMaterial.specularColor=Color3.Black();routeMaterial.zOffset=-2
-  const routesMesh=MeshBuilder.CreateGround('colony-supply-routes',{width:130,height:80},scene);routesMesh.parent=root;routesMesh.position.set(65,.06,40);routesMesh.material=routeMaterial;routesMesh.isPickable=false
+  const routesMesh=MeshBuilder.CreateGround('colony-supply-routes',{width:130,height:80,subdivisions:128,updatable:true},scene);routesMesh.parent=root;routesMesh.position.set(65,.06,40);routesMesh.material=routeMaterial;routesMesh.isPickable=false
+  const routeVertices=routesMesh.getVerticesData(VertexBuffer.PositionKind)!;for(let i=0;i<routeVertices.length;i+=3)routeVertices[i+1]=frontierHeight(routeVertices[i]+65,routeVertices[i+2]+40);routesMesh.updateVerticesData(VertexBuffer.PositionKind,routeVertices)
   sign('refuge-sign','LAST LIGHT REFUGE',refuge.x,3.55,refuge.z+4.16,4.4)
   habitat('abandoned-colony-habitat',27,7,8,6,cream)
   habitat('resistance-headquarters',34,9.5,12,8,green)
@@ -151,7 +155,7 @@ export function buildFrontierWorld(scene:Scene,shadows:ShadowGenerator){
     const container=await SceneLoader.LoadAssetContainerAsync('/assets/detailed/',file,scene)
     if(scene.isDisposed){container.dispose();return}
     for(const [index,[x,z,angle,scale]] of placements.entries()){
-      const holder=new TransformNode(`${file}-${index}`,scene);holder.parent=root;holder.position.set(x,0,z);holder.rotation.y=angle;holder.scaling.setAll(scale)
+      const holder=new TransformNode(`${file}-${index}`,scene);holder.parent=root;holder.position.set(x,frontierHeight(x,z),z);holder.rotation.y=angle;holder.scaling.setAll(scale)
       const copy=container.instantiateModelsToScene(name=>`${file}-${index}-${name}`,false,{doNotInstantiate:false})
       copy.rootNodes.forEach(node=>node.parent=holder)
       holder.getChildMeshes().forEach(mesh=>{mesh.isPickable=false;mesh.receiveShadows=true;shadows.addShadowCaster(mesh)})
@@ -174,13 +178,32 @@ export function buildFrontierWorld(scene:Scene,shadows:ShadowGenerator){
     const x=7+rand(i+600)*115,z=4+rand(i+700)*70
     if(x>20&&x<125&&z>15&&z<68)continue
     const h=5+rand(i+800)*4
-    const trunk=MeshBuilder.CreateCylinder('wind-carved-tree',{height:h,diameterTop:.12,diameterBottom:.55,tessellation:10},scene);trunk.parent=root;trunk.position.set(x,h/2,z);trunk.material=bark;trunk.rotation.z=.1;shadows.addShadowCaster(trunk)
+    const trunk=MeshBuilder.CreateCylinder('wind-carved-tree',{height:h,diameterTop:.12,diameterBottom:.55,tessellation:10},scene);trunk.parent=root;trunk.position.set(x,frontierHeight(x,z)+h/2,z);trunk.material=bark;trunk.rotation.z=.1;shadows.addShadowCaster(trunk)
     for(let k=0;k<5;k++){
       const angle=k*2.4
-      beamBetween(scene,'swept-branch',new Vector3(x,h*.6,z),new Vector3(x+Math.sin(angle)*2,h+.3-k*.3,z+Math.cos(angle)*2),.13,root,bark)
+      beamBetween(scene,'swept-branch',new Vector3(x,frontierHeight(x,z)+h*.6,z),new Vector3(x+Math.sin(angle)*2,frontierHeight(x,z)+h+.3-k*.3,z+Math.cos(angle)*2),.13,root,bark)
 
     }
   }
+  // Sparse crossed grass cards use one draw call and keep the travel routes readable.
+  const grassTexture=new DynamicTexture('dry-frontier-grass',{width:256,height:256},scene,true)
+  const gc=grassTexture.getContext();gc.clearRect(0,0,256,256)
+  for(let i=0;i<54;i++){
+    const x=32+rand(i+2400)*192,top=15+rand(i+2500)*170,lean=(rand(i+2600)-.5)*65
+    gc.strokeStyle=i%3?'rgba(135,131,85,.88)':'rgba(77,107,99,.85)';gc.lineWidth=1+rand(i+2700)*2;gc.beginPath();gc.moveTo(x,256);gc.quadraticCurveTo(x+lean*.3,top+55,x+lean,top);gc.stroke()
+  }
+  grassTexture.hasAlpha=true;grassTexture.update()
+  const grassMaterial=new StandardMaterial('dry-grass-surface',scene);grassMaterial.diffuseTexture=grassTexture;grassMaterial.opacityTexture=grassTexture;grassMaterial.backFaceCulling=false;grassMaterial.specularColor=Color3.Black();grassMaterial.transparencyMode=2
+  const card=MeshBuilder.CreatePlane('grass-cross-a',{width:1.2,height:1.1},scene);card.position.y=.55;const crossed=card.clone('grass-cross-b');crossed.rotation.y=Math.PI/2
+  const grass=Mesh.MergeMeshes([card,crossed],true,true)!;grass.name='frontier-grass-clusters';grass.material=grassMaterial;grass.isPickable=false
+  const transforms:number[]=[]
+  for(let i=0;i<520;i++){
+    const x=rand(i+2800)*130,z=rand(i+3400)*80
+    if((x>48&&x<120&&z>12&&z<57)||Math.hypot(x-25,z-55)<3)continue
+    const scale=.45+rand(i+4000)*.75
+    transforms.push(...Matrix.Compose(new Vector3(scale,scale,scale),Quaternion.RotationAxis(Vector3.Up(),rand(i+4600)*6.28),new Vector3(x,frontierHeight(x,z),z)).toArray())
+  }
+  grass.thinInstanceSetBuffer('matrix',new Float32Array(transforms),16,true);grass.parent=root
   const soft=new DynamicTexture('soft-wreck-plume',{width:64,height:64},scene,false);const sc=soft.getContext(),sg=sc.createRadialGradient(32,32,0,32,32,32);sg.addColorStop(0,'#ffffff88');sg.addColorStop(.5,'#ffffff30');sg.addColorStop(1,'#ffffff00');sc.fillStyle=sg;sc.fillRect(0,0,64,64);soft.hasAlpha=true;soft.update()
   const smoke=new ParticleSystem('wreck-smoke',100,scene);smoke.particleTexture=soft;smoke.emitter=new Vector3(11,1.5,70);smoke.minEmitBox=new Vector3(-1,0,-2);smoke.maxEmitBox=new Vector3(1,0,2);smoke.color1=new Color4(.13,.14,.13,.25);smoke.color2=new Color4(.20,.21,.19,.12);smoke.colorDead=new Color4(.2,.21,.2,0);smoke.minSize=1;smoke.maxSize=3;smoke.minLifeTime=4;smoke.maxLifeTime=7;smoke.emitRate=9;smoke.direction1=new Vector3(.3,1,0);smoke.direction2=new Vector3(.8,1.5,.3);smoke.blendMode=ParticleSystem.BLENDMODE_STANDARD;smoke.start()
   // Merge static surfaces by material: the frontier stays within a phone's draw-call budget.
@@ -201,7 +224,7 @@ export function buildFrontierWorld(scene:Scene,shadows:ShadowGenerator){
 }
 
 export function buildFieldStructure(scene:Scene,type:string,x:number,z:number){
-  const root=new TransformNode(`constructed-${type}`,scene);root.position.set(x,0,z)
+  const root=new TransformNode(`constructed-${type}`,scene);root.position.set(x,frontierHeight(x,z),z)
   const shell=fieldMetal(scene,`${type}-olive-housing`,'#5f6955',.5,.56),steel=fieldMetal(scene,`${type}-steel`,'#303b38',.8,.42),edge=fieldMetal(scene,`${type}-edges`,'#8e9383',.65,.35)
   const status=fieldMetal(scene,`${type}-status`,'#83acb1',.2,.4);status.emissiveColor=new Color3(.06,.18,.20)
   const panel=(name:string,w:number,h:number,d:number,px:number,py:number,pz:number,m:PBRMaterial)=>{const o=armorPanel(scene,name,w,h,d,.06,root);o.position.set(px,py,pz);o.material=m;return o}
@@ -220,6 +243,9 @@ export function buildFieldStructure(scene:Scene,type:string,x:number,z:number){
     panel('drill-crosshead',2.3,.4,.9,0,2.6,0,shell);cyl('drill-spindle',.24,2,0,1.35,0,edge)
     for(let i=0;i<8;i++)cyl('auger-flight',.65-i*.035,.08,0,.4+i*.18,0,steel)
     panel('ore-processing-unit',1.2,1.2,1.5,0,.85,-1,shell);panel('extraction-status',.3,.15,.02,0,1.1,-1.76,status)
+    const rotating=root.getChildMeshes().filter(mesh=>mesh.name==='drill-spindle'||mesh.name==='auger-flight')
+    const observer=scene.onBeforeRenderObservable.add(()=>rotating.forEach(mesh=>mesh.rotation.y+=scene.getEngine().getDeltaTime()*.004))
+    root.onDisposeObservable.add(()=>scene.onBeforeRenderObservable.remove(observer))
   }else{
     cyl('reactor-vessel',1.6,2.8,0,1.6,0,steel)
     for(let i=0;i<6;i++){const a=i*Math.PI/3;panel('reactor-cooling-fin',.12,2.2,.5,Math.sin(a)*.9,1.55,Math.cos(a)*.9,shell).rotation.y=a}
@@ -230,7 +256,7 @@ export function buildFieldStructure(scene:Scene,type:string,x:number,z:number){
 }
 
 export function buildOreDeposit(scene:Scene,id:string,type:string,x:number,z:number){
-  const root=new TransformNode(`ore-${id}`,scene);root.position.set(x,0,z)
+  const root=new TransformNode(`ore-${id}`,scene);root.position.set(x,frontierHeight(x,z),z)
   const rock=new PBRMaterial(`ore-host-${id}`,scene);rock.albedoTexture=new Texture('/assets/rock-ground-color.webp',scene);rock.albedoColor=new Color3(.32,.34,.29);rock.roughness=.95;rock.metallic=.1
   const ore=fieldMetal(scene,`ore-veins-${id}`,type==='minerals'?'#5c8390':'#8e855f',.7,.3);ore.emissiveColor=type==='minerals'?new Color3(.015,.07,.09):new Color3(.07,.05,.01)
   for(let i=0;i<7;i++){

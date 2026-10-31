@@ -1,5 +1,5 @@
-import {Color3, DynamicTexture, FreeCamera, Matrix, MeshBuilder, PBRMaterial, Scene, SceneLoader, StandardMaterial, TransformNode, Vector3} from '@babylonjs/core'
-import {armorPanel, fieldMetal} from './FieldGeometry'
+import {Color3, FreeCamera, MeshBuilder, Scene, SceneLoader, StandardMaterial, TransformNode, Vector3} from '@babylonjs/core'
+import {buildInductionWeapon} from './InductionWeapon'
 import './DetailedAssets'
 export type EquipmentStatus='loading'|'ready'|'failed'
 const models:Record<string,string>={Fighter:'rifle-m4.glb',Monk:'rifle-recon.glb',Cleric:'rifle-support.glb',Wizard:'rifle-marksman.glb'}
@@ -17,31 +17,8 @@ export function createFieldRifle(scene:Scene,camera:FreeCamera,role='Fighter',on
     const copy=container.instantiateModelsToScene(name=>`view-${name}`,false,{doNotInstantiate:true})
     copy.rootNodes.forEach(node=>{node.parent=authored;node.setEnabled(true)})
     copy.animationGroups.forEach(group=>group.stop())
-    // Retrofit the authored weapon, retaining its detailed grip, action and hands.
     const gun=authored.getDescendants().find(node=>/Gun_(m4a1|mp5a5|scarl|vss)$/.test(node.name))
-    if(gun instanceof TransformNode){
-      authored.computeWorldMatrix(true);gun.computeWorldMatrix(true)
-      const inverse=Matrix.Invert(gun.getWorldMatrix()),lo=new Vector3(Infinity,Infinity,Infinity),hi=new Vector3(-Infinity,-Infinity,-Infinity)
-      for(const mesh of gun.getChildMeshes()){
-        mesh.computeWorldMatrix(true)
-        for(const corner of mesh.getBoundingInfo().boundingBox.vectorsWorld){const p=Vector3.TransformCoordinates(corner,inverse);lo.minimizeInPlace(p);hi.maximizeInPlace(p)}
-        if(mesh.material instanceof PBRMaterial){const mat=mesh.material.clone(`frontier-${mesh.material.name}`);mat.albedoColor=new Color3(.30,.39,.43);mat.metallic=.7;mat.roughness=.38;mesh.material=mat}
-      }
-      if(Number.isFinite(lo.x)){
-        const size=hi.subtract(lo),center=lo.add(hi).scale(.5)
-        const shell=fieldMetal(scene,'ceramic-induction-casing','#344b54',.72,.34)
-        const light=fieldMetal(scene,'charged-induction-channel',role==='Wizard'?'#a497e9':'#6bc9dc',.4,.3);light.emissiveColor=role==='Wizard'?new Color3(.32,.14,.65):new Color3(.03,.22,.30)
-        // Gun assets run along local Y; these plates wrap the existing upper receiver.
-        for(const side of [-1,1]){
-          const plate=armorPanel(scene,'receiver-ceramic-jacket',size.x*.13,size.y*.30,size.z*.18,size.x*.03,gun)
-          plate.position.set(center.x+side*size.x*.49,center.y+size.y*.12,center.z+size.z*.1);plate.material=shell
-          for(let i=0;i<5;i++){const vent=armorPanel(scene,'induction-vent',size.x*.018,size.y*.012,size.z*.06,size.x*.008,gun);vent.position.set(center.x+side*size.x*.565,center.y+size.y*(.04+i*.035),center.z+size.z*.1);vent.material=light}
-        }
-        const display=new DynamicTexture('weapon-charge-readout',{width:256,height:128},scene,false),dc=display.getContext();dc.fillStyle='#081b24';dc.fillRect(0,0,256,128);dc.fillStyle='#8cf0ff';dc.font='bold 37px monospace';dc.fillText('K-7 //',15,48);dc.font='22px monospace';dc.fillText('INDUCTION',15,86);display.update()
-        const screenMat=new StandardMaterial('weapon-readout',scene);screenMat.diffuseTexture=display;screenMat.emissiveTexture=display;screenMat.disableLighting=true
-        const screen=MeshBuilder.CreatePlane('receiver-charge-display',{width:size.x*.75,height:size.y*.12},scene);screen.parent=gun;screen.position.set(center.x,center.y+size.y*.13,hi.z+size.z*.025);screen.material=screenMat
-      }
-    }
+    if(gun instanceof TransformNode)buildInductionWeapon(scene,gun,role)
     authored.getChildMeshes().forEach(mesh=>{mesh.isPickable=false;mesh.renderingGroupId=2})
     const muzzle=authored.getDescendants().find(node=>/MuzzleSocket$/.test(node.name))
     if(muzzle instanceof TransformNode){flash.parent=muzzle;flash.position=Vector3.Zero()}

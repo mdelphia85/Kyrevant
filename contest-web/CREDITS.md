@@ -35,3 +35,6 @@ The frontier sky panorama was generated specifically for this project with OpenA
 - **SciFi Helmet**, by Michael Pavlovic, converted to glTF by Norbert Nopper: https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/SciFiHelmet — CC0. Textures resized/compressed to WebP, model scaled and attached to the unit's head for Kyrevant. This is the SciFiHelmet model, not the separate DamagedHelmet sample.
 
 The source creators' model-license metadata was checked on October 30, 2026. Credits and the CC BY license link are accessible from the game's How to Play panel at `/credits.html`.
+
+## Original induction weapons and frontier terrain
+The K-7 Vanguard, K-3 Wraith, S-4 Warden and A-9 Lance bodies are original geometry built for Kyrevant. The credited authored gun models supply hand rigs and reference transforms; their modern weapon meshes are hidden in this release. Surface maps retain the credits above. The terrain height field, supply routes, vegetation cards, colony modules and rescue-plan logic are original project code.

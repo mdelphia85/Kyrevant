@@ -1,3 +1,4 @@
+import {buildInductionWeapon} from './InductionWeapon'
 import { AnimationGroup, AssetContainer, Matrix, MeshoptCompression, Quaternion, Scene, SceneLoader, TransformNode, Vector3 } from '@babylonjs/core'
 // All compressed assets decode locally, including on a phone with no third-party CDN access.
 MeshoptCompression.Configuration={decoder:{url:'/assets/detailed/meshopt_decoder.js'}}
@@ -85,5 +86,6 @@ export async function addWorldServiceRifle(scene:Scene,unit:TransformNode){
   gun.scaling.setAll(.5*factor);gun.position.set(0,.15*factor,0)
   gun.rotationQuaternion=null;gun.rotation.set(Math.PI/2,0,0)
   gun.getChildMeshes().forEach(mesh=>{mesh.isPickable=false;mesh.receiveShadows=true;mesh.setEnabled(true)})
+  buildInductionWeapon(scene,gun,'Fighter')
   return gun
 }

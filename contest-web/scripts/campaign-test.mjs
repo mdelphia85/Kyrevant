@@ -1,3 +1,4 @@
+import {frontierHeight,frontierLineClear,WORLD_METERS_PER_UNIT} from '../src/world.ts'
 import assert from 'node:assert/strict'
 import { io } from 'socket.io-client'
 import { setTimeout as sleep } from 'node:timers/promises'
@@ -5,6 +6,8 @@ const origin=process.env.TEST_SERVER_URL||'http://127.0.0.1:3101'
 const host=io(origin,{autoConnect:false}), guest=io(origin,{autoConnect:false})
 const once=(socket,event,ms=12000)=>new Promise((resolve,reject)=>{const timer=setTimeout(()=>{socket.off(event,handler);reject(new Error(`Timeout ${event}`))},ms);function handler(data){clearTimeout(timer);resolve(data)}socket.once(event,handler)})
 const ack=(socket,event,data)=>new Promise((resolve,reject)=>socket.timeout(12000).emit(event,data,(error,result)=>error?reject(error):resolve(result)))
+let turretShots=0
+host.on('turret-attack',data=>{assert.ok(Number.isFinite(data.startX)&&Number.isFinite(data.targetX));turretShots++})
 let state={players:[],enemies:[],quests:[],resourceNodes:[],buildings:[],level:1,economy:{minerals:0,energy:0}},code,won=false
 host.on('player-state',players=>state.players=players)
 host.on('player-positions',players=>state.players=players)
@@ -46,8 +49,8 @@ async function fight(filter=()=>true){
     for(const socket of [host,guest]){
       const ally=player(socket);if(ally.downed)continue
       const ex=enemy.x-ally.x,ey=enemy.y-ally.y,dist=Math.hypot(ex,ey)
-      if(dist>430)socket.emit('move-player',{roomCode:code,dx:ex/dist,dy:ey/dist})
-      socket.emit('attack',{roomCode:code,aimX:ex/dist,aimY:ey/dist,aimElevation:0})
+      if(dist>430||!frontierLineClear(ally.x*.05,frontierHeight(ally.x*.05,ally.y*.05)+1.65,ally.y*.05,enemy.x*.05,frontierHeight(enemy.x*.05,enemy.y*.05)+1.25,enemy.y*.05))socket.emit('move-player',{roomCode:code,dx:ex/dist,dy:ey/dist})
+      socket.emit('attack',{roomCode:code,aimX:ex/dist,aimY:ey/dist,aimElevation:(()=>{const height=frontierHeight(enemy.x*WORLD_METERS_PER_UNIT,enemy.y*WORLD_METERS_PER_UNIT)-frontierHeight(ally.x*WORLD_METERS_PER_UNIT,ally.y*WORLD_METERS_PER_UNIT)-.4;return height/Math.hypot(dist*WORLD_METERS_PER_UNIT,height)})()})
     }
     await sleep(55)
   }
@@ -60,7 +63,7 @@ try{
   assert.ok((await ack(guest,'join-room',{roomCode:code,playerName:'Second Client'})).success)
   assert.ok((await ack(host,'start-game',code)).success)
   host.emit('select-class',{roomCode:code,characterClass:'Fighter',species:'Stoneborn'})
-  guest.emit('select-class',{roomCode:code,characterClass:'Fighter',species:'Aelari'})
+  guest.emit('select-class',{roomCode:code,characterClass:process.env.RESCUE_TACTIC==='sabotage'?'Wizard':process.env.RESCUE_TACTIC==='relief'?'Cleric':'Fighter',species:'Aelari'})
   const mission=once(host,'mission-started')
   await ack(host,'set-ready',code);await ack(guest,'set-ready',code);state=await mission
   assert.equal(player(host).maxHealth,140);assert.equal(player(guest).maxShield,135)
@@ -78,9 +81,12 @@ try{
   console.log('PASS: friendly story dialogue protects readers under fire')
   await talk(500,1100,'flightLog','download','recover-flight-log')
   await fight(e=>e.id==='l1-raider-1'||e.id==='l1-raider-2')
-  await talk(1150,600,'innkeeper','ask_missing','meet-innkeeper')
+  await talk(1150,600,'innkeeper',process.env.RESCUE_TACTIC==='sabotage'?'plan_sabotage':process.env.RESCUE_TACTIC==='relief'?'plan_relief':'ask_missing','meet-innkeeper')
+  await synchronize();assert.equal(state.questFlags.rescueTactic,process.env.RESCUE_TACTIC||'assault')
+  if(process.env.RESCUE_TACTIC==='sabotage')assert.ok(state.enemies.filter(e=>['l1-outpost-1','l1-outpost-2'].includes(e.id)).every(e=>e.maxHealth===62))
   await fight(e=>e.id.startsWith('l1-outpost-'))
   await talk(2200,950,'missing','free','rescue-civilians')
+  if(process.env.RESCUE_ONLY){console.log(`PASS: ${process.env.RESCUE_TACTIC} class-specific rescue plan`)}else{
   await talk(1700,550,'resistance','alliance','meet-resistance')
   await mine('minerals',180);assert.ok(done('gather-minerals'))
   await mine('energy',60)
@@ -101,7 +107,9 @@ try{
   await fight();console.log('PASS: Citadel approach secured')
   await travel(1970,330);host.emit('interact',code);await until(()=>done('activate-citadel-core'),'Citadel core')
   await fight(e=>e.id==='final-commander');await until(()=>won,'Shared victory')
-  console.log('PASS: all three chapters reach shared victory using public player actions')
+  assert.ok(turretShots>0,'constructed turrets must visibly fire at hostiles')
+  console.log('PASS: all three chapters reach shared victory using public player actions, including turret fire')
   host.emit('restart-campaign',code);await until(()=>state.level===1,'Restart')
   assert.ok(state.quests.every(q=>!q.complete));console.log('PASS: campaign restart resets objectives')
+  }
 }finally{host.disconnect();guest.disconnect()}

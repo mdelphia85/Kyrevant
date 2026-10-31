@@ -42,7 +42,7 @@ import './GameCanvas.css'
 import Arrival from './Arrival'
 import { buildFrontierWorld, buildFieldStructure, buildOreDeposit, FRONTIER_SCALE } from './FrontierWorld'
 import { createFieldRifle, type EquipmentStatus } from './FieldRifle'
-import { WORLD_METERS_PER_UNIT } from '../world'
+import { WORLD_METERS_PER_UNIT, frontierHeight, distanceToTrail } from '../world'
 import { addArmoredHelmet, addWorldServiceRifle, loadFieldSquad } from './DetailedAssets'
 import TouchControls from './TouchControls'
 import { CombatAudio } from './CombatAudio'
@@ -1011,7 +1011,7 @@ const glow =
         {
           width: 55,
           height: 35,
-          subdivisions: 72,
+          subdivisions: 128,
           updatable: true,
         },
         scene,
@@ -1029,11 +1029,15 @@ const glow =
       for(let i=0;i<terrainPositions.length;i+=3) {
         const px=terrainPositions[i]+26
         const pz=terrainPositions[i+2]+16
-        const pathDistance=Math.abs(pz-(14+.15*(px-23)))
-        const playableFade=Math.min(1,Math.max(0,(pathDistance-2.6)/8))
-        const noise=smoothNoise(px/3.8,pz/3.9,8)*.65+smoothNoise(px/1.3,pz/1.3,38)*.2
-        terrainPositions[i+1]=Math.max(-.10,(noise-.47)*.52)*playableFade
+        terrainPositions[i+1]=frontierHeight(px*FRONTIER_SCALE,pz*FRONTIER_SCALE)
       }
+      const surfaceColors:number[]=[]
+      for(let i=0;i<terrainPositions.length;i+=3){
+        const x=(terrainPositions[i]+26)*FRONTIER_SCALE,z=(terrainPositions[i+2]+16)*FRONTIER_SCALE
+        const macro=smoothNoise(x/12,z/12,71),trail=Math.max(0,1-distanceToTrail(x,z)/3)
+        surfaceColors.push(.55+macro*.5+trail*.12,.53+macro*.43+trail*.06,.48+macro*.34,1)
+      }
+      ground.setVerticesData(VertexBuffer.ColorKind,surfaceColors)
       ground.setVerticesData(VertexBuffer.PositionKind,terrainPositions,true)
       const normals:number[]=[]
       VertexData.ComputeNormals(terrainPositions,Array.from(terrainIndices),normals)
@@ -1051,15 +1055,15 @@ const glow =
     const scannedGround = new PBRMaterial('kyrevant-scanned-ground-pbr', scene)
     scannedGround.metallic = 0.0
     scannedGround.roughness = 0.94
-    scannedGround.albedoColor = new Color3(.42, .40, .38)
+    scannedGround.albedoColor = new Color3(.68, .63, .52)
     const groundAlbedo = new Texture(
       KYREVANT_GROUND_COLOR_URL, scene, true, false,
       Texture.TRILINEAR_SAMPLINGMODE,
       () => { if (!scene.isDisposed) ground.material = scannedGround },
       () => { console.warn('Scanned ground unavailable: using built-in terrain texture') },
     )
-    groundAlbedo.uScale = 22
-    groundAlbedo.vScale = 14
+    groundAlbedo.uScale = 15
+    groundAlbedo.vScale = 10
     scannedGround.albedoTexture = groundAlbedo
     const groundNormal = new Texture(
       KYREVANT_GROUND_NORMAL_URL, scene, true, false,
@@ -1133,7 +1137,7 @@ const glow =
       if(scene.isDisposed){container.dispose();return}
       for(const site of actors){
         const npc=new TransformNode(`story-${site.quest}`,scene)
-        npc.position.set(sx(site.x),0,sz(site.y));npc.rotation.y=-.5
+        npc.position.set(sx(site.x),frontierHeight(sx(site.x),sz(site.y)),sz(site.y));npc.rotation.y=-.5
         const copy=container.instantiateModelsToScene(name=>`${site.quest}-${name}`,false,{doNotInstantiate:true})
         copy.rootNodes.forEach(node=>node.parent=npc)
         copy.animationGroups.forEach(group=>group.stop());copy.animationGroups.find(group=>/^idle$/i.test(group.name))?.start(true)
@@ -1264,6 +1268,9 @@ const glow =
       // The Vanguard mesh is full-sized, human-proportioned (~2 metres).
       // It is animated and retains its authored PBR texture set.
       root.scaling.setAll(role === 'Commander' ? 1.24 : role === 'Heavy' ? 1.12 : 1)
+      const lineage=currentPlayers.find(player=>player.id===id)?.species
+      if(lineage==='Stoneborn')root.scaling.set(1.12,.86,1.12)
+      else if(lineage==='Aelari')root.scaling.set(.94,1.06,.94)
       const allMeshes = root.getChildMeshes()
       for (const mesh of allMeshes) {
         mesh.isPickable = false
@@ -1305,7 +1312,7 @@ const glow =
       // blocked, or fail; they must never hold up FPS camera/input/game startup.
       if (map.has(id) || scene.isDisposed) return
       const placeholder = new TransformNode(`loading-unit-${id}`,scene)
-      placeholder.position.set(sx(x), 0, sz(y))
+      placeholder.position.set(sx(x), frontierHeight(sx(x),sz(y)), sz(y))
       const visual: CharacterVisual = {
         root: placeholder,
         model: placeholder,
@@ -1839,7 +1846,7 @@ const glow =
             visual.root.position.z
           visual.root.position.set(
             sx(player.x),
-            0,
+            frontierHeight(sx(player.x),sz(player.y)),
             sz(player.y),
           )
           setMarineMoving(player.id,
@@ -1892,7 +1899,7 @@ const glow =
             visual.root.position.clone()
           visual.root.position.set(
             sx(enemy.x),
-            0,
+            frontierHeight(sx(enemy.x),sz(enemy.y)),
             sz(enemy.y),
           )
           /*
@@ -2064,13 +2071,13 @@ const glow =
       const start =
         new Vector3(
           sx(attack.startX),
-          1.15,
+          1.15+frontierHeight(sx(attack.startX),sz(attack.startY)),
           sz(attack.startY),
         )
       const end =
         new Vector3(
           sx(attack.targetX),
-          1.2,
+          1.2+frontierHeight(sx(attack.targetX),sz(attack.targetY)),
           sz(attack.targetY),
         )
       muzzleFlash(
@@ -2083,6 +2090,13 @@ const glow =
         true,
         true,
       )
+    }
+    function handleTurretAttack(attack:EnemyAttack){
+      const turret=buildingVisuals.get(attack.enemyId)
+      if(turret)turret.rotation.y=Math.atan2(attack.targetX-attack.startX,attack.targetY-attack.startY)
+      const start=new Vector3(sx(attack.startX),frontierHeight(sx(attack.startX),sz(attack.startY))+1.3,sz(attack.startY))
+      const end=new Vector3(sx(attack.targetX),frontierHeight(sx(attack.targetX),sz(attack.targetY))+1.2,sz(attack.targetY))
+      muzzleFlash(start,false);animateProjectile(start,end,false,true)
     }
     /*
       LEVEL TRANSITION
@@ -2211,6 +2225,7 @@ const glow =
       if (value.status === 'active') frontierSetPiece?.beginWave(value.wave)
     }
     socket.on('kyrevant-dialogue', onDialogue)
+    socket.on('turret-attack',handleTurretAttack)
     const onUplink=(value:{active:boolean;progress:number;operators:number;message:string})=>setUplink(value)
     socket.on('kyrevant-uplink',onUplink)
     socket.on('kyrevant-chapter-state', onChapter)
@@ -2331,7 +2346,7 @@ const glow =
           It works even when the player model is still loading.
         */
         if (local) {
-          const position = new Vector3(sx(local.x), 0, sz(local.y))
+          const position = new Vector3(sx(local.x), frontierHeight(sx(local.x),sz(local.y)), sz(local.y))
           if (commandModeRef.current) {
             camera.setTarget(position)
           } else {
@@ -2562,6 +2577,7 @@ const glow =
         handleEnemyAttack,
       )
       socket.off('kyrevant-dialogue', onDialogue)
+      socket.off('turret-attack',handleTurretAttack)
       socket.off('kyrevant-uplink', onUplink)
       socket.off('kyrevant-chapter-state', onChapter)
       socket.off('kyrevant-progression', onProgress)
@@ -2741,9 +2757,9 @@ const glow =
         {!commandMode && (
           <div className={`fps-instructions fps-instructions--${mouseStatus}`} aria-live="polite">
             {mouseStatus === 'locked'
-              ? 'WASD MOVE · HOLD CLICK TO FIRE · E INTERACT · ESC CURSOR'
+              ? 'WASD MOVE · HOLD CLICK FIRE · Q ABILITY · E USE · M MINE · ESC CURSOR'
               : mouseStatus === 'fallback'
-                ? 'WASD MOVE · MOUSE AIM · HOLD CLICK TO FIRE'
+                ? 'WASD MOVE · MOUSE AIM · HOLD CLICK FIRE · Q ABILITY'
                 : mouseStatus === 'released'
                   ? 'CURSOR FREE · CLICK THE WORLD TO RESUME AIMING'
                   : 'CLICK TO AIM · WASD MOVE · E INTERACT · M MINE'}
