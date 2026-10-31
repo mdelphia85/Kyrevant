@@ -19,7 +19,7 @@ try {
   if(!ready)throw new Error(`Server failed readiness: ${output}`)
   const response=await fetch(origin)
   if(!response.ok || !(await response.text()).includes('root')) throw new Error('Built client not served')
-  const test=spawn(process.execPath,['--import','tsx',process.argv.includes('--campaign')?'scripts/campaign-test.mjs':'scripts/multiplayer-smoke.mjs'],{env:{...process.env,TEST_SERVER_URL:origin},stdio:'inherit'})
+  const test=spawn(process.execPath,['--import','tsx',process.argv.includes('--recovery')?'scripts/recovery-test.mjs':process.argv.includes('--campaign')?'scripts/campaign-test.mjs':'scripts/multiplayer-smoke.mjs'],{env:{...process.env,TEST_SERVER_URL:origin},stdio:'inherit'})
   const code=await new Promise(resolve=>test.once('exit',resolve))
   if(code!==0)throw new Error(`Multiplayer check exited ${code}`)
   console.log('PASS: production health endpoint and built website are reachable.')

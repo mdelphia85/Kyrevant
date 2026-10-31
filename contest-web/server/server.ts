@@ -1,6 +1,7 @@
 import { WORLD_METERS_PER_UNIT, PLAYER_HIT_RADIUS_UNITS, frontierHeight, frontierLineClear } from '../src/world.ts'
 import { species, characterClasses, type Species } from '../src/characters.ts'
 import express from 'express'
+import { randomBytes } from 'node:crypto'
 import path from 'node:path'
 import { existsSync } from 'node:fs'
 import cors from 'cors'
@@ -25,6 +26,7 @@ type BuildingType =
   | 'Turret'
   | 'PowerCore'
 type Player = {
+  connected?: boolean
   id: string
   name: string
   isHost: boolean
@@ -1348,6 +1350,26 @@ function damagePlayer(
   }
 }
 const departures = new Map<string, ReturnType<typeof setTimeout>>()
+const recoverySessions=new Map<string,{roomCode:string;playerId:string}>()
+const RECOVERY_WINDOW_MS=10*60*1000
+function issueRecovery(socket:any,roomCode:string){
+  const token=randomBytes(32).toString('hex')
+  recoverySessions.set(token,{roomCode,playerId:socket.id})
+  return token
+}
+function removeFromParty(playerId:string){
+  const timer=departures.get(playerId);if(timer)clearTimeout(timer);departures.delete(playerId)
+  attackCooldowns.delete(playerId);abilityCooldowns.delete(playerId)
+  for(const [token,session] of recoverySessions)if(session.playerId===playerId)recoverySessions.delete(token)
+  for(const [code,room] of rooms){
+    const index=room.players.findIndex(player=>player.id===playerId)
+    if(index<0)continue
+    const [leaving]=room.players.splice(index,1)
+    if(!room.players.length){rooms.delete(code);chapterTransitions.delete(code);continue}
+    if(leaving.isHost)(room.players.find(player=>player.connected!==false)??room.players[0]).isHost=true
+    io.to(code).emit('room-updated',room)
+  }
+}
 io.on(
   'connection',
   (socket: any) => {
@@ -1358,16 +1380,40 @@ io.on(
       const invalid = (event === 'create-room' && typeof data !== 'string') ||
         (requiresCode && typeof data !== 'string') ||
         (requiresData && (!data || typeof data !== 'object' || typeof data.roomCode !== 'string')) ||
-        (['create-room','join-room','start-game','set-ready'].includes(event) && typeof callback !== 'function')
+        (['create-room','join-room','start-game','set-ready','resume-session','leave-room'].includes(event) && typeof callback !== 'function')
       if (invalid) { if (typeof callback === 'function') callback({success:false,message:'Invalid request.'}); return }
       next()
     })
     const pendingDeparture = departures.get(socket.id)
     if (pendingDeparture) { clearTimeout(pendingDeparture); departures.delete(socket.id) }
+    socket.on('resume-session',(data:{token?:string},callback:(response:any)=>void)=>{
+      const session=typeof data?.token==='string'&&/^[a-f0-9]{64}$/.test(data.token)?recoverySessions.get(data.token):undefined
+      const room=session?rooms.get(session.roomCode):undefined
+      const player=room?.players.find(p=>p.id===session?.playerId)
+      if(!session||!room||!player){callback({success:false,message:'Your previous session has ended. Create a new room or join your friends.'});return}
+      if([...rooms.values()].some(candidate=>candidate.players.some(p=>p.id===socket.id&&p!==player))){callback({success:false,message:'This tab is already in another party.'});return}
+      const previousId=player.id
+      if(previousId!==socket.id){
+        const previousSocket=io.sockets.sockets.get(previousId)
+        if(previousSocket){previousSocket.emit('session-replaced');previousSocket.disconnect(true)}
+        for(const cooldowns of [attackCooldowns,abilityCooldowns]){const last=cooldowns.get(previousId);if(last!==undefined)cooldowns.set(socket.id,last);cooldowns.delete(previousId)}
+      }
+      const timer=departures.get(previousId);if(timer)clearTimeout(timer);departures.delete(previousId)
+      player.id=socket.id;player.connected=true;session.playerId=socket.id
+      socket.join(room.code)
+      callback({success:true,room,roomCode:room.code})
+      io.to(room.code).emit('room-updated',room)
+      emitChapterSummary(room)
+    })
     socket.on('request-room-state', () => {
       const room = [...rooms.values()].find(candidate => candidate.players.some(player => player.id === socket.id))
+      if(room){const player=room.players.find(p=>p.id===socket.id);if(player)player.connected=true}
       socket.emit('session-state', room ?? null)
-      if (room) emitChapterSummary(room)
+      if (room) socket.emit('kyrevant-chapter-state',chapterSummary(room))
+    })
+    socket.on('leave-room',(_data:unknown,callback:(response:any)=>void)=>{
+      for(const room of rooms.values())if(room.players.some(player=>player.id===socket.id))socket.leave(room.code)
+      removeFromParty(socket.id);callback({success:true})
     })
     socket.on('restart-campaign', (code: string) => {
       const room = rooms.get(code)
@@ -1385,8 +1431,10 @@ io.on(
           message?: string
           roomCode?: string
           room?: Room
+          resumeToken?: string
         }) => void,
       ) => {
+        if([...rooms.values()].some(room=>room.players.some(player=>player.id===socket.id))){callback({success:false,message:'Leave your current party before creating another.'});return}
         const name =
           typeof playerName === 'string' ? playerName.trim().slice(0,20) : ''
         if (!name) {
@@ -1454,6 +1502,7 @@ io.on(
           success: true,
           roomCode: code,
           room,
+          resumeToken:issueRecovery(socket,code),
         })
       },
     )
@@ -1468,9 +1517,11 @@ io.on(
           success: boolean
           message?: string
           room?: Room
+          resumeToken?: string
         }) => void,
       ) => {
         if (!data || typeof data.roomCode !== 'string' || typeof data.playerName !== 'string') { callback?.({ success:false, message:'Enter a player name and room code.' }); return }
+        if([...rooms.values()].some(room=>room.players.some(player=>player.id===socket.id))){callback({success:false,message:'Leave your current party before joining another.'});return}
         const code =
           data.roomCode
             .trim()
@@ -1533,6 +1584,7 @@ io.on(
         callback({
           success: true,
           room,
+          resumeToken:issueRecovery(socket,code),
         })
       },
     )
@@ -2362,55 +2414,12 @@ io.on(
     socket.on(
       'disconnect',
       () => {
-        departures.set(socket.id, setTimeout(() => {
-        departures.delete(socket.id)
-        attackCooldowns.delete(
-          socket.id,
-        )
-        abilityCooldowns.delete(
-          socket.id,
-        )
-        for (
-          const [
-            code,
-            room,
-          ]
-          of rooms.entries()
-        ) {
-          const index =
-            room.players.findIndex(
-              (player) =>
-                player.id ===
-                socket.id,
-            )
-          if (index < 0) {
-            continue
-          }
-          const leaving =
-            room.players[index]
-          room.players.splice(
-            index,
-            1,
-          )
-          if (
-            room.players.length ===
-            0
-          ) {
-            rooms.delete(code)
-            continue
-          }
-          if (
-            leaving.isHost
-          ) {
-            room.players[0].isHost =
-              true
-          }
-          io.to(code).emit(
-            'room-updated',
-            room,
-          )
+        let hasCharacter=false
+        for(const room of rooms.values()){
+          const player=room.players.find(p=>p.id===socket.id)
+          if(player){hasCharacter=true;player.connected=false;io.to(room.code).emit('room-updated',room)}
         }
-        }, 45000))
+        if(hasCharacter)departures.set(socket.id,setTimeout(()=>removeFromParty(socket.id),RECOVERY_WINDOW_MS))
       },
     )
   },
@@ -2425,7 +2434,7 @@ setInterval(() => {
     (room) => {
       if (
         room.phase !==
-        'mission'
+        'mission' || !room.players.some(player=>player.connected!==false)
       ) {
         return
       }
@@ -2524,7 +2533,7 @@ setInterval(() => {
       }
       // Preserve movement after a wipe: revive the party rather than leaving
       // players permanently downed and unable to issue movement commands.
-      if (room.players.length > 0 && room.players.every(player => player.downed)) {
+      if (room.players.some(player=>player.connected!==false) && room.players.filter(player=>player.connected!==false).every(player => player.downed)) {
         if (room.wipeAt === undefined) room.wipeAt = now
         if (now - room.wipeAt >= 4500) {
           assignSpawnPoints(room.players)
@@ -2568,7 +2577,7 @@ setInterval(() => {
           room.players.forEach(
             (player) => {
               if (
-                player.downed
+                player.downed || player.connected===false
               ) {
                 return
               }
@@ -2768,7 +2777,7 @@ setInterval(() => {
   )
 }, 300)
 const distDirectory = path.resolve(process.cwd(), 'dist')
-app.get('/healthz', (_req, res) => res.status(200).json({ ok: true, game: 'KYREVANT', multiplayer: true, build: '2026-10-30.5' }))
+app.get('/healthz', (_req, res) => res.status(200).json({ ok: true, game: 'KYREVANT', multiplayer: true, build: '2026-10-31.1' }))
 if (existsSync(path.join(distDirectory, 'index.html'))) {
   app.use(express.static(distDirectory, { maxAge: 3600000 }))
   app.get('/', (_req, res) => res.sendFile(path.join(distDirectory, 'index.html')))

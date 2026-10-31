@@ -196,6 +196,7 @@ type BuildingType =
   | 'Turret'
   | 'PowerCore'
 type Player = {
+  connected?: boolean
   id: string
   name: string
   isHost?: boolean
@@ -255,6 +256,7 @@ type Economy = {
   energy: number
 }
 type Room = {
+  phase?: string
   code: string
   players: Player[]
   enemies: Enemy[]
@@ -268,6 +270,7 @@ type DialogueOption = { id: string; label: string }
 type GameDialogue = { site: string; speaker: string; title: string; lines: string[]; choices: DialogueOption[] }
 type ChapterStatus = { stage: number; totalStages: number; title: string; wave: number; waveTotal: number; weapon: string; description: string }
 type GameCanvasProps = {
+  onLeave?:()=>void
   room: Room
   socket: Socket
 }
@@ -334,6 +337,7 @@ const KYREVANT_STORY_SITES = [
 function GameCanvas({
   room,
   socket,
+  onLeave,
 }: GameCanvasProps) {
   const roomSnapshot = useRef(room)
   useEffect(() => { roomSnapshot.current = room }, [room])
@@ -414,7 +418,7 @@ function GameCanvas({
   const soundRef = useRef<CombatAudio | null>(null)
   useEffect(() => { if(soundRef.current) soundRef.current.enabled=soundEnabled },[soundEnabled])
   const [hitAt, setHitAt] = useState(0)
-  const [showArrival, setShowArrival] = useState(true)
+  const [showArrival, setShowArrival] = useState(()=>sessionStorage.getItem(`kyrevant-intro-${room.code}`)!=='seen'&&(room.level??1)===1&&room.phase!=='victory')
   const [showBuildMenu, setShowBuildMenu] = useState(false)
   const combatPaused = useRef(true)
   const [showFullQuestLog, setShowFullQuestLog] = useState(false)
@@ -449,7 +453,7 @@ function GameCanvas({
   const [
     victory,
     setVictory,
-  ] = useState(false)
+  ] = useState(room.phase==='victory')
   const localPlayer =
     players.find(
       (player) =>
@@ -1348,7 +1352,7 @@ const glow =
     }
     function createPlayer(player: Player) {
       registerCombatant(player.id, player.characterClass ?? 'Fighter',
-        player.x, player.y, !player.downed, playerVisuals)
+        player.x, player.y, !player.downed&&player.connected!==false, playerVisuals)
     }
     function createEnemy(enemy: Enemy) {
       registerCombatant(enemy.id, enemy.type,
@@ -1828,6 +1832,8 @@ const glow =
       currentPlayers =
         [...updated]
       setPlayers(updated)
+      const activeIds=new Set(updated.map(player=>player.id))
+      for(const [id,visual] of playerVisuals)if(!activeIds.has(id)){visual.root.dispose();playerVisuals.delete(id);marineAnimations.delete(id)}
       updated.forEach(
         (player) => {
           const visual =
@@ -1849,6 +1855,7 @@ const glow =
             frontierHeight(sx(player.x),sz(player.y)),
             sz(player.y),
           )
+          visual.root.setEnabled(player.connected!==false&&!(player.id===localId&&!commandModeRef.current))
           setMarineMoving(player.id,
             Math.hypot(visual.root.position.x - visual.lastX,
                        visual.root.position.z - visual.lastY) > 0.002)
@@ -2231,6 +2238,8 @@ const glow =
     socket.on('kyrevant-chapter-state', onChapter)
     socket.on('kyrevant-progression', onProgress)
     socket.on('kyrevant-defense-state', onDefense)
+    // The first chapter broadcast may precede scene mounting or a restored connection.
+    socket.emit('request-room-state')
     /* SOCKET EVENTS */
     socket.on(
       'player-positions',
@@ -2678,7 +2687,7 @@ const glow =
 
   return (
     <div className={`kyrevant-game immersive-hud ${commandMode ? "is-command" : ""}`}>
-      {showArrival && <Arrival onComplete={() => setShowArrival(false)} />}
+      {showArrival && <Arrival onComplete={() => {sessionStorage.setItem(`kyrevant-intro-${room.code}`,'seen');setShowArrival(false)}} />}
 
  
       <header className="battle-hud">
@@ -2863,7 +2872,7 @@ const glow =
           HOW TO PLAY
         </button>
         {showRules && <div role="dialog" aria-label="How to play" style={{position:'absolute',
-          top:'12%',left:'50%',transform:'translateX(-50%)',zIndex:40,width:'min(540px,90%)',
+          top:'12%',left:'50%',transform:'translateX(-50%)',zIndex:40,width:'min(540px,90%)',maxHeight:'76%',overflowY:'auto',
           padding:22,background:'rgba(4,15,27,.98)',border:'2px solid #7db5ce',borderRadius:10,
           color:'#e6f5ff',font:'14px/1.6 Arial'}}>
           <h2 style={{margin:'0 0 10px'}}>KYREVANT · CO-OP RULES</h2>
@@ -2871,11 +2880,12 @@ const glow =
           <p><b>Objective:</b> Work together to read the plea near the wreck, find Elias, defeat patrols, talk to settlers, rescue captives, mine minerals, build defenses, survive three waves and defeat the commander.</p>
           <p><b>Controls:</b> WASD move · Mouse aim/look · Hold left click / SPACE fire · E talk/interact · M mine · Q special ability · ESC release cursor. Build in Command Mode.</p>
           <p><b>Win:</b> Complete all the mission objectives. Shared resources and buildings belong to your squad; both players share the victory.</p>
-          <p><a href="/credits.html" target="_blank" rel="noreferrer" style={{color:'#9ccad5'}}>Art and asset credits</a></p><button type="button" onClick={() => setShowRules(false)}>RETURN TO GAME</button>
+          <p><a href="/credits.html" target="_blank" rel="noreferrer" style={{color:'#9ccad5'}}>Art and asset credits</a></p><button type="button" onClick={() => setShowRules(false)}>RETURN TO GAME</button> {onLeave&&<button type="button" onClick={onLeave}>LEAVE SQUAD</button>}
+          <p style={{fontSize:12,color:'#a1bac5'}}>Refresh or briefly reconnect to return to this character. Disconnected slots are held for ten minutes. Leaving the squad releases your character.</p>
         </div>}
         {dialogue && <div role="dialog" aria-label={dialogue.title} style={{position:'absolute',
           zIndex:42,top:'14%',left:'50%',transform:'translateX(-50%)',
-          width:'min(520px,92%)',padding:20,background:'rgba(5,17,31,.98)',
+          width:'min(520px,92%)',maxHeight:'72%',overflowY:'auto',padding:20,background:'rgba(5,17,31,.98)',
           color:'#e8f7ff',border:'2px solid #78b2d1',borderRadius:11,
           boxShadow:'0 18px 50px rgba(0,0,0,.65)',font:'13px/1.6 Arial'}}>
           <div style={{fontSize:11,letterSpacing:2,color:'#85d8ff'}}>{dialogue.speaker}</div>

@@ -14,7 +14,8 @@
     "test": "node scripts/test-local.mjs",
     "test:campaign": "node scripts/test-local.mjs --campaign",
     "test:input": "node --import tsx scripts/input-test.mjs",
-    "test:terrain": "node --import tsx scripts/terrain-test.mjs"
+    "test:terrain": "node --import tsx scripts/terrain-test.mjs",
+    "test:recovery": "node scripts/test-local.mjs --recovery"
   },
   "dependencies": {
     "@babylonjs/core": "^9.29.0",
