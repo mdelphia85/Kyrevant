@@ -19,6 +19,11 @@ try{
   guest.emit('select-class',{roomCode:code,characterClass:'Cleric',species:'Aelari'})
   const mission=once(host,'mission-started');await ack(host,'set-ready',code);await ack(guest,'set-ready',code);await mission
   let room=await state(host),p=room.players.find(p=>p.id===host.id)
+  const vitals=room.players.map(p=>({id:p.id,health:p.health,shield:p.shield}))
+  guest.emit('use-ability',code);await sleep(100);room=await state(host)
+  for(const before of vitals){const ally=room.players.find(p=>p.id===before.id);assert.ok(ally.health>=before.health);assert.ok(ally.shield>=before.shield,'Cleric must not reduce lineage shields above 100')}
+  const recharging=once(guest,'kyrevant-progression');guest.emit('use-ability',code);assert.match(await recharging,/RECHARGING/)
+  console.log('PASS: real Cleric healing preserves lineage maxima and reports cooldown')
   for(let i=0;i<70&&Math.hypot(p.x-500,p.y-1100)>90;i++){
     const d=Math.hypot(500-p.x,1100-p.y);host.emit('move-player',{roomCode:code,dx:(500-p.x)/d,dy:(1100-p.y)/d});await sleep(55);room=await state(host);p=room.players.find(p=>p.id===host.id)
   }

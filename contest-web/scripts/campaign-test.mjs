@@ -67,6 +67,7 @@ try{
   const mission=once(host,'mission-started')
   await ack(host,'set-ready',code);await ack(guest,'set-ready',code);state=await mission
   assert.equal(player(host).maxHealth,140);assert.equal(player(guest).maxShield,135)
+  assert.equal((await ack(host,'choose-talent',{roomCode:code,talent:'sentinel'})).success,false,'paths require rank two')
   const rejected=once(host,'build-denied');host.emit('build-structure',{roomCode:code,type:'Extractor',x:-100,y:1000});assert.match(await rejected,/boundary/);await synchronize();assert.equal(state.buildings.length,0)
   const original=player(host).x
   host.emit('move-player',{roomCode:code,dx:NaN,dy:0})
@@ -87,6 +88,13 @@ try{
   if(process.env.RESCUE_TACTIC==='sabotage')assert.ok(state.enemies.filter(e=>['l1-outpost-1','l1-outpost-2'].includes(e.id)).every(e=>e.maxHealth===62))
   await fight(e=>e.id.startsWith('l1-outpost-'))
   await talk(2200,950,'missing','free','rescue-civilians')
+  await synchronize();assert.ok(player(host).rank>=2)
+  assert.equal((await ack(host,'choose-talent',{roomCode:code,talent:'evoker'})).success,false,'paths must match the class')
+  const previousShield=player(host).maxShield
+  assert.equal((await ack(host,'choose-talent',{roomCode:code,talent:'sentinel'})).success,true)
+  await synchronize();assert.equal(player(host).talent,'sentinel');assert.equal(player(host).maxShield,previousShield+30)
+  assert.equal((await ack(host,'choose-talent',{roomCode:code,talent:'breacher'})).success,false,'one path per campaign')
+  console.log('PASS: rank gate, class validation, one-time path selection and shield bonus')
   if(process.env.RESCUE_ONLY){console.log(`PASS: ${process.env.RESCUE_TACTIC} class-specific rescue plan`)}else{
   await talk(1700,550,'resistance','alliance','meet-resistance')
   await mine('minerals',180);assert.ok(done('gather-minerals'))
@@ -97,7 +105,8 @@ try{
   for(let wave=1;wave<=3;wave++){await until(()=>state.enemies.some(e=>e.alive&&e.id.startsWith(`l1-defense-${wave}-`)),`Wave ${wave}`);await fight(e=>e.id.startsWith(`l1-defense-${wave}-`));console.log(`PASS: defense wave ${wave}`)}
   await until(()=>done('defend-settlement'),'Defense complete')
   await fight(e=>e.type==='Commander');await until(()=>state.level===2,'Chapter 2')
-  console.log('PASS: crash, note, rescue, mining, construction, settlement defense, chapter transition')
+  assert.equal(player(host).talent,'sentinel');assert.equal(player(host).maxShield,100+(player(host).rank-1)*8+30)
+  console.log('PASS: crash, note, rescue, mining, construction, settlement defense, path preserved across chapter transition')
   await mine('minerals',250);await mine('energy',120)
   await build('Barracks',850,1250);await build('PowerCore',1050,1250)
   await fight();console.log('PASS: frontier approach secured')
@@ -111,6 +120,6 @@ try{
   assert.ok(turretShots>0,'constructed turrets must visibly fire at hostiles')
   console.log('PASS: all three chapters reach shared victory using public player actions, including turret fire')
   host.emit('restart-campaign',code);await until(()=>state.level===1,'Restart')
-  assert.ok(state.quests.every(q=>!q.complete));console.log('PASS: campaign restart resets objectives')
+  assert.ok(state.quests.every(q=>!q.complete));assert.equal(player(host).talent,undefined);assert.equal(player(host).maxShield,100);console.log('PASS: campaign restart resets objectives')
   }
 }finally{host.disconnect();guest.disconnect()}

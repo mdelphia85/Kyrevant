@@ -68,3 +68,10 @@ Run `npm run test:combat` for motion and placement checks, `npm run test:recover
 
 ## Crash-site opening and visual materials
 The transport impact now cuts to the actual world for the surface reveal. The camera frames the crashed ship, then turns toward the lantern-marked note. Physical amber route markers lead to the warm-lit refuge entrance, and the next objective follows the note to Elias. Generated silt and basalt materials replace the repeated gravel look, with new fractured rock silhouettes and a slimmer weapon receiver/optic. Generated terrain credits are included in CREDITS.md and the in-game credits page.
+
+## Class paths and enemy tactics
+At rank two, open Mission Log and choose one permanent path for this campaign. Fighter chooses grenade damage or maximum shields; Monk chooses dash range or cooldown; Cleric chooses health/revival or shields; Wizard chooses blast damage or cooldown. Paths survive chapter changes and saved-character recovery and reset on campaign replay. The journal stays closed during combat unless opened.
+
+Militia troops approach around terrain that blocks sight, circle at firing distance, and briefly pull back when threatened. Heavy troops favor holding their firing position. These tactics use terrain sight tests and home-area limits, not a full navigation mesh. Cleric healing respects every lineage and rank maximum.
+
+Run `node --import tsx scripts/progression-tactics-test.mjs` for healing, path validation and enemy movement checks. The campaign test also verifies rank requirements, class restrictions, shield bonuses, chapter preservation and replay reset.

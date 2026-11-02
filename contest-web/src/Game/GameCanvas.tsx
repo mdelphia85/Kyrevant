@@ -1,3 +1,4 @@
+import {CLASS_PATHS,chosenPath} from '../progression'
 import {placementProblem} from '../buildRules'
 import {WeaponMotion} from './WeaponMotion'
 import {
@@ -213,12 +214,16 @@ type Player = {
   species?: string
   xp?: number
   rank?: number
+  talent?: string
   maxHealth?: number
   shield?: number
   maxShield?: number
   downed?: boolean
 }
 type Enemy = {
+  facingX?:number
+  facingY?:number
+  intent?:string
   id: string
   type:
     | 'Raider'
@@ -431,6 +436,9 @@ function GameCanvas({
   const [uplink, setUplink] = useState<{active:boolean;progress:number;operators:number;message:string}|null>(null)
   const [chapterStatus, setChapterStatus] = useState<ChapterStatus | null>(null)
   const [progressMessage, setProgressMessage] = useState('')
+  const [talentBusy,setTalentBusy]=useState(false)
+  const [talentMessage,setTalentMessage]=useState('')
+  useEffect(()=>{if(!progressMessage)return;const timer=window.setTimeout(()=>setProgressMessage(''),6500);return()=>window.clearTimeout(timer)},[progressMessage])
   const [showRules, setShowRules] = useState(false)
   useEffect(() => { combatPaused.current = showArrival || dialogue !== null || showRules }, [showArrival, dialogue, showRules])
   const [mouseStatus, setMouseStatus] = useState<'ready' | 'locked' | 'fallback' | 'released'>('ready')
@@ -1955,13 +1963,9 @@ const glow =
                 oldPosition,
               )
           setMarineMoving(enemy.id, enemy.alive&&Math.hypot(movement.x,movement.z)>0.002)
-          if (enemy.alive&&Math.hypot(movement.x,movement.z)>0.005) {
-            visual.root.rotation.y =
-              Math.atan2(
-                movement.x,
-                movement.z,
-              ) +
-              Math.PI
+          if(enemy.alive){
+            const fx=enemy.facingX??movement.x,fz=enemy.facingY??movement.z
+            if(Math.hypot(fx,fz)>.005)visual.root.rotation.y=Math.atan2(fx,fz)+Math.PI
           }
           visual.root.setEnabled(enemy.alive||performance.now()-(defeatedAt.get(enemy.id)??-Infinity)<650)
         },
@@ -2910,7 +2914,7 @@ const glow =
               }}>{choice.label}</button>)}
           </div>
         </div>}
-<button className="journal-toggle" onClick={() => setShowFullQuestLog(value => !value)} aria-expanded={showFullQuestLog}>MISSION LOG</button>
+<button className="journal-toggle" onClick={() => setShowFullQuestLog(value => !value)} aria-expanded={showFullQuestLog}>MISSION LOG{(localPlayer?.rank??1)>=2&&!localPlayer?.talent?' · PATH AVAILABLE':''}</button>
 {showFullQuestLog && <aside className="quest-panel" style={{
           maxHeight: showFullQuestLog ? '46vh' : '174px',
           overflowY: 'auto', maxWidth: '300px',
@@ -2924,6 +2928,18 @@ const glow =
               {showFullQuestLog ? 'COLLAPSE' : 'ALL'}
             </button>
           </h3>
+          <section className="class-path" aria-label="Character progression">
+            <strong>{localPlayer?.species} {localPlayer?.characterClass} · Rank {localPlayer?.rank??1}</strong>
+            <small>{localPlayer?.xp??0} / {(localPlayer?.rank??1)*100} XP toward the next rank</small>
+            {localPlayer?.talent?<p><b>{chosenPath(localPlayer.characterClass,localPlayer.talent)?.name}</b> · {chosenPath(localPlayer.characterClass,localPlayer.talent)?.description}</p>:(localPlayer?.rank??1)<2?<p>A class path unlocks at rank two.</p>:<>
+              <p>Choose one path for this campaign.</p>
+              {localPlayer?.characterClass&&CLASS_PATHS[localPlayer.characterClass].map(path=><button type="button" key={path.id} disabled={talentBusy||!socket.connected} onClick={()=>{
+                setTalentBusy(true);setTalentMessage('')
+                socket.timeout(10000).emit('choose-talent',{roomCode:room.code,talent:path.id},(error:Error|null,response:{success:boolean;message?:string})=>{setTalentBusy(false);setTalentMessage(error?'Connection delayed. Try again.':response?.success?'Path chosen.':response?.message??'Could not choose a path.')})
+              }}><b>{path.name}</b><span>{path.description}</span></button>)}
+            </>}
+            {talentMessage&&<p role="status">{talentMessage}</p>}
+          </section>
           {(showFullQuestLog ? quests : quests.filter(q => !q.complete).slice(0, 2)).map(
             (quest) => (
               <div

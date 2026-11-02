@@ -503,3 +503,7 @@
 .immersive-hud .build-mode-label{pointer-events:auto;z-index:26;top:100px;right:24px;max-width:280px;background:#071922ed;border-color:#5b8a9d;color:#e0f2f3;letter-spacing:.06em}.immersive-hud .build-mode-label small{color:#98bfcb}.immersive-hud .build-mode-label button{pointer-events:auto}@media(pointer:coarse){.immersive-hud .build-mode-label{top:94px;right:12px;max-width:230px;padding:10px}}
 
 .immersive-hud:has(.arrival) .battle-hud,.immersive-hud:has(.arrival) .chapter-status,.immersive-hud:has(.arrival) .squad-radar,.immersive-hud:has(.arrival) .story-location,.immersive-hud:has(.arrival) .journal-toggle,.immersive-hud:has(.arrival) .game-action-bar,.immersive-hud:has(.arrival) .fps-instructions,.immersive-hud:has(.arrival) .crosshair,.immersive-hud:has(.arrival) .game-window>button{visibility:hidden}
+
+.class-path{margin:10px 0 16px;padding:12px;background:#132b36;border:1px solid #45616b;border-radius:5px;font:12px/1.5 system-ui}.class-path>small{display:block;color:#99b7c2;margin-top:4px}.class-path p{margin:8px 0}.class-path button{display:block;width:100%;margin:7px 0;padding:9px;text-align:left;border:1px solid #688e9a;background:#1a3c49;color:#e3f5f5;cursor:pointer}.class-path button span{display:block;font-size:11px;color:#b2ccd3;margin-top:3px}.class-path button:disabled{opacity:.55;cursor:default}
+
+.immersive-hud .quest-panel{pointer-events:auto;z-index:26}

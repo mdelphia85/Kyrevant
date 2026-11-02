@@ -1,3 +1,5 @@
+import {chosenPath,shieldTalentBonus,abilityTuning,pulseRecovery} from '../src/progression.ts'
+import {enemyTactic} from '../src/enemyTactics.ts'
 import { BUILD_COSTS, placementProblem } from '../src/buildRules.ts'
 import { WORLD_METERS_PER_UNIT, PLAYER_HIT_RADIUS_UNITS, frontierHeight, frontierLineClear } from '../src/world.ts'
 import { species, characterClasses, type Species } from '../src/characters.ts'
@@ -46,6 +48,7 @@ type Player = {
   xp?: number
   rank?: number
   weaponTier?: number
+  talent?: string
   species?: Species
   lastDamagedAt?: number
   dialogueUntil?: number
@@ -63,6 +66,9 @@ type Enemy = {
   maxHealth: number
   alive: boolean
   lastAttack: number
+  facingX?:number
+  facingY?:number
+  intent?:string
 }
 type ResourceNode = {
   id: string
@@ -283,7 +289,7 @@ function assignSpawnPoints(
       player.facingY = 0
       const lineage = species.find(option => option.name === player.species) ?? species[0]
       player.maxHealth = lineage.health + ((player.rank ?? 1)-1)*12
-      player.maxShield = lineage.shield + ((player.rank ?? 1)-1)*8
+      player.maxShield = lineage.shield + ((player.rank ?? 1)-1)*8 + shieldTalentBonus(player.characterClass,player.talent)
       player.health = player.maxHealth
       player.shield = player.maxShield
       player.downed = false
@@ -1016,7 +1022,7 @@ function awardXp(player: Player, amount: number) {
     player.health = player.maxHealth
     player.shield = player.maxShield
     io.to(player.id).emit('kyrevant-progression',
-      `LEVEL ${player.rank} REACHED · Health and shields increased`)
+      `LEVEL ${player.rank} REACHED · Health and shields increased${player.rank===2?' · Choose a class path in Mission Log.':''}`)
   }
 }
 function rewardSquad(room: Room, xp: number) {
@@ -1356,11 +1362,11 @@ io.on(
     socket.use((packet: unknown[], next: (error?: Error) => void) => {
       const [event, data, callback] = packet as [string, any, any]
       const requiresCode = ['start-game','set-ready','interact','use-ability','restart-campaign'].includes(event)
-      const requiresData = ['join-room','select-class','move-player','attack','mine-resource','build-structure'].includes(event)
+      const requiresData = ['join-room','select-class','move-player','attack','mine-resource','build-structure','choose-talent'].includes(event)
       const invalid = (event === 'create-room' && typeof data !== 'string') ||
         (requiresCode && typeof data !== 'string') ||
         (requiresData && (!data || typeof data !== 'object' || typeof data.roomCode !== 'string')) ||
-        (['create-room','join-room','start-game','set-ready','resume-session','leave-room'].includes(event) && typeof callback !== 'function')
+        (['create-room','join-room','start-game','set-ready','resume-session','leave-room','choose-talent'].includes(event) && typeof callback !== 'function')
       if (invalid) { if (typeof callback === 'function') callback({success:false,message:'Invalid request.'}); return }
       next()
     })
@@ -1395,11 +1401,21 @@ io.on(
       for(const room of rooms.values())if(room.players.some(player=>player.id===socket.id))socket.leave(room.code)
       removeFromParty(socket.id);callback({success:true})
     })
+    socket.on('choose-talent',(data:{roomCode:string;talent:string},callback:(response:any)=>void)=>{
+      const room=rooms.get(data.roomCode),player=room?.players.find(p=>p.id===socket.id)
+      if(!room||room.phase!=='mission'||!player||!player.characterClass||(player.rank??1)<2||player.talent){callback({success:false,message:'Reach rank two and choose one path per campaign.'});return}
+      const path=chosenPath(player.characterClass,data.talent)
+      if(!path){callback({success:false,message:'That path is not available to your class.'});return}
+      player.talent=path.id
+      const bonus=shieldTalentBonus(player.characterClass,path.id);player.maxShield+=bonus;player.shield=Math.min(player.maxShield,player.shield+bonus)
+      callback({success:true});io.to(room.code).emit('player-state',room.players)
+      io.to(player.id).emit('kyrevant-progression',`${path.name.toUpperCase()} CHOSEN · ${path.description}`)
+    })
     socket.on('restart-campaign', (code: string) => {
       const room = rooms.get(code)
       if (room?.phase !== 'victory' || !room.players.some(p => p.id === socket.id && p.isHost)) return
       chapterTransitions.delete(code)
-      room.players.forEach(p => { p.xp = 0; p.rank = 1; p.weaponTier = 1 })
+      room.players.forEach(p => { p.xp = 0; p.rank = 1; p.weaponTier = 1; p.talent=undefined })
       startLevel(room, 1)
     })
     socket.on(
@@ -2191,7 +2207,7 @@ io.on(
               socket.id,
           )
         if (
-          !room ||
+          !room || room.phase!=='mission' ||
           !player ||
           !player.characterClass ||
           player.downed
@@ -2204,10 +2220,12 @@ io.on(
           abilityCooldowns.get(
             socket.id,
           ) ?? 0
+        const tuning=abilityTuning(player.characterClass,player.talent)
         if (
           now - previous <
-          6000
+          tuning.cooldown
         ) {
+          io.to(player.id).emit('kyrevant-progression',`ABILITY RECHARGING · ${Math.ceil((tuning.cooldown-(now-previous))/1000)}s`)
           return
         }
         abilityCooldowns.set(
@@ -2228,27 +2246,7 @@ io.on(
                   ally.y,
                 ) <= 400
               ) {
-                if (
-                  ally.downed
-                ) {
-                  ally.downed =
-                    false
-                  ally.health =
-                    35
-                } else {
-                  ally.health =
-                    Math.min(
-                      100,
-                      ally.health +
-                        40,
-                    )
-                }
-                ally.shield =
-                  Math.min(
-                    100,
-                    ally.shield +
-                      30,
-                  )
+                Object.assign(ally,pulseRecovery(ally,tuning.heal,tuning.shield,tuning.revive))
               }
             },
           )
@@ -2259,22 +2257,19 @@ io.on(
         ) {
           player.x +=
             player.facingX *
-            200
+            tuning.dash
           player.y +=
             player.facingY *
-            200
+            tuning.dash
         }
+        player.x=Math.max(30,Math.min(WORLD_WIDTH-30,player.x));player.y=Math.max(30,Math.min(WORLD_HEIGHT-30,player.y))
         if (
           player.characterClass ===
             'Fighter' ||
           player.characterClass ===
             'Wizard'
         ) {
-          const damage =
-            player.characterClass ===
-            'Wizard'
-              ? 75
-              : 60
+          const damage = tuning.damage
           room.enemies.forEach(
             (enemy) => {
               if (
@@ -2525,6 +2520,7 @@ setInterval(() => {
             const wanderX = home.x + Math.sin(now * .00028 + enemy.id.length) * 55
             const wanderY = home.y + Math.cos(now * .00031 + enemy.id.length) * 55
             const drift = normalize(wanderX - enemy.x, wanderY - enemy.y)
+            enemy.intent='patrolling';enemy.facingX=drift.x;enemy.facingY=drift.y
             if (distance(enemy.x, enemy.y, wanderX, wanderY) > 6) {
               enemy.x += drift.x * 2.6
               enemy.y += drift.y * 2.6
@@ -2538,6 +2534,7 @@ setInterval(() => {
               (room.level === 1 &&
                distance(target.x, target.y, 315, 1270) < 270)) {
             const toHome = normalize(home.x - enemy.x, home.y - enemy.y)
+            enemy.intent='regrouping';enemy.facingX=toHome.x;enemy.facingY=toHome.y
             if (distance(enemy.x, enemy.y, home.x, home.y) > 10) {
               enemy.x += toHome.x * 8
               enemy.y += toHome.y * 8
@@ -2552,30 +2549,12 @@ setInterval(() => {
                   'Heavy'
                 ? 320
                 : 280
-          if (
-            best >
-            attackRange || !frontierLineClear(enemy.x*WORLD_METERS_PER_UNIT,frontierHeight(enemy.x*WORLD_METERS_PER_UNIT,enemy.y*WORLD_METERS_PER_UNIT)+1.15,enemy.y*WORLD_METERS_PER_UNIT,target.x*WORLD_METERS_PER_UNIT,frontierHeight(target.x*WORLD_METERS_PER_UNIT,target.y*WORLD_METERS_PER_UNIT)+1.2,target.y*WORLD_METERS_PER_UNIT)
-          ) {
-            const direction =
-              normalize(
-                target.x -
-                  enemy.x,
-                target.y -
-                  enemy.y,
-              )
-            const speed =
-              enemy.type ===
-              'Heavy'
-                ? 5
-                : 8
-            enemy.x +=
-              direction.x *
-              speed
-            enemy.y +=
-              direction.y *
-              speed
-            return
-          }
+          const visible=frontierLineClear(enemy.x*.05,frontierHeight(enemy.x*.05,enemy.y*.05)+1.15,enemy.y*.05,target.x*.05,frontierHeight(target.x*.05,target.y*.05)+1.2,target.y*.05)
+          const tactic=enemyTactic(enemy,target,now,visible)
+          enemy.intent=tactic.mode;enemy.facingX=(target.x-enemy.x)/(best||1);enemy.facingY=(target.y-enemy.y)/(best||1)
+          const nextX=Math.max(30,Math.min(WORLD_WIDTH-30,enemy.x+tactic.dx)),nextY=Math.max(30,Math.min(WORLD_HEIGHT-30,enemy.y+tactic.dy))
+          if(distance(nextX,nextY,home.x,home.y)<=320){enemy.x=nextX;enemy.y=nextY}
+          if(distance(enemy.x,enemy.y,target.x,target.y)>attackRange||!visible||!frontierLineClear(enemy.x*.05,frontierHeight(enemy.x*.05,enemy.y*.05)+1.15,enemy.y*.05,target.x*.05,frontierHeight(target.x*.05,target.y*.05)+1.2,target.y*.05))return
           if (
             now -
               enemy.lastAttack <
@@ -2695,7 +2674,7 @@ setInterval(() => {
   )
 }, 300)
 const distDirectory = path.resolve(process.cwd(), 'dist')
-app.get('/healthz', (_req, res) => res.status(200).json({ ok: true, game: 'KYREVANT', multiplayer: true, build: '2026-11-02.1' }))
+app.get('/healthz', (_req, res) => res.status(200).json({ ok: true, game: 'KYREVANT', multiplayer: true, build: '2026-11-02.2' }))
 if (existsSync(path.join(distDirectory, 'index.html'))) {
   app.use(express.static(distDirectory, { maxAge: 3600000 }))
   app.get('/', (_req, res) => res.sendFile(path.join(distDirectory, 'index.html')))
