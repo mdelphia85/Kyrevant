@@ -1262,8 +1262,8 @@ function chapterSummary(room: Room) {
   const flags=room.questFlags
   const done=(id:string)=>Boolean(room.quests.find(q=>q.id===id)?.complete)
   const stage = !flags.crashLogRecovered ? 1
-    : !done('secure-landing-zone') ? 2
-    : !flags.innkeeperContacted ? 3
+    : !flags.innkeeperContacted ? 2
+    : !done('secure-landing-zone') ? 3
     : !flags.civiliansRescued ? 4
     : !flags.resistanceContacted ? 5
     : !done('gather-minerals') ? 6
@@ -1271,7 +1271,7 @@ function chapterSummary(room: Room) {
     : !flags.raidLaunched ? 8
     : !room.defenseComplete ? 9 : 10
   const stages = [
-    'READ THE WEATHERED NOTE','SECURE THE LANDING ZONE','FIND ELIAS',
+    'READ THE WEATHERED NOTE','FIND ELIAS','SECURE THE REFUGE APPROACH',
     'FREE THE MISSING COLONISTS','FIND CAPTAIN VALE',
     'MINE FOR THE RESISTANCE','BUILD YOUR DEFENSES',
     'SIGNAL THE RESISTANCE','DEFEND THE SETTLEMENT','CONFRONT THE COMMANDER',
@@ -1279,7 +1279,7 @@ function chapterSummary(room: Room) {
   return {stage,totalStages:10,title:stages[stage-1],
     wave:room.defenseWave??0, waveTotal:3,
     weapon:room.players[0]?.weaponTier === 2 ? 'RESISTANCE PULSE CARBINE' : 'SALVAGE CARBINE',
-    description:room.quests.find(q=>!q.complete)?.text ?? 'Campaign objectives completed.'}
+    description:stage===2?'Follow the low amber lights to the Last Light Refuge. Speak to Elias beneath the warm entrance beacon.':room.quests.find(q=>!q.complete)?.text ?? 'Campaign objectives completed.'}
 }
 function emitChapterSummary(room: Room) {
   const summary = chapterSummary(room)
@@ -2695,7 +2695,7 @@ setInterval(() => {
   )
 }, 300)
 const distDirectory = path.resolve(process.cwd(), 'dist')
-app.get('/healthz', (_req, res) => res.status(200).json({ ok: true, game: 'KYREVANT', multiplayer: true, build: '2026-10-31.2' }))
+app.get('/healthz', (_req, res) => res.status(200).json({ ok: true, game: 'KYREVANT', multiplayer: true, build: '2026-11-02.1' }))
 if (existsSync(path.join(distDirectory, 'index.html'))) {
   app.use(express.static(distDirectory, { maxAge: 3600000 }))
   app.get('/', (_req, res) => res.sendFile(path.join(distDirectory, 'index.html')))

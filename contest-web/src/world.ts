@@ -19,7 +19,7 @@ export function frontierHeight(x:number,z:number){
   const hill=(cx:number,cz:number,rx:number,rz:number,h:number)=>h*Math.exp(-(((x-cx)/rx)**2+((z-cz)/rz)**2))
   const height=hill(39,61,11,14,4.8)+hill(42,20,12,12,4)+hill(81,62,18,11,4.3)+hill(94,8,11,9,6)+hill(8,34,11,14,3)
   // Mission pads stay level; smooth shoulders preserve continuous movement.
-  const pads=[[25,55,4],[57.5,26,10],[67.5,17.5,7],[85,24,10],[110,47.5,11],[112.5,53.75,8],[92.5,16,5],[98.5,16.5,5],[112,15,6]]
+  const pads=[[10,47,9],[25,55,4],[57.5,26,10],[67.5,17.5,7],[85,24,10],[110,47.5,11],[112.5,53.75,8],[92.5,16,5],[98.5,16.5,5],[112,15,6]]
   let clearance=Math.max(0,(distanceToTrail(x,z)-2.5)/5)
   for(const [px,pz,r] of pads)clearance=Math.min(clearance,Math.max(0,(Math.hypot(x-px,z-pz)-r)/5))
   const t=Math.min(1,clearance),smooth=t*t*(3-2*t)

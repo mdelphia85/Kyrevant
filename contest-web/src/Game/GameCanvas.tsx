@@ -53,7 +53,7 @@ import { CombatInput } from './CombatInput'
 // CC0 scanned rocky ground by Rob Tuytel / Poly Haven. Real photos, albedo and
 // tangent-space normal detail -- not a noise-only placeholder material.
 const KYREVANT_GROUND_COLOR_URL =
-  '/assets/rock-ground-color.webp'
+  '/assets/frontier-silt-v1.webp'
 const KYREVANT_GROUND_NORMAL_URL =
   '/assets/rock-ground-normal.webp'
 
@@ -788,7 +788,7 @@ const glow =
     const localSpawn=currentPlayers.find(player=>player.id===localId)
     const fpsCamera = new FreeCamera(
       'kyrevant-fps-camera',
-      new Vector3(sx(localSpawn?.x??280), 1.65, sz(localSpawn?.y??1240)),
+      new Vector3(sx(localSpawn?.x??280), 1.65+frontierHeight(sx(localSpawn?.x??280),sz(localSpawn?.y??1240)), sz(localSpawn?.y??1240)),
       scene,
     )
     fpsCamera.minZ = 0.055
@@ -797,7 +797,8 @@ const glow =
     // Face toward the playable settlement, with the ground in view.
     // Starting with a level horizon and looking toward the map edge
     // made combat mode appear to show only a blue/empty background.
-    fpsCamera.setTarget(new Vector3(25, 1.6, 55))
+    const firstArrival=sessionStorage.getItem(`kyrevant-intro-${room.code}`)!=='seen'&&(room.level??1)===1&&room.phase!=='victory'
+    fpsCamera.setTarget(firstArrival?new Vector3(10,1.7,47):fpsCamera.position.add(new Vector3(localSpawn?.facingX??1,0,localSpawn?.facingY??0).scale(10)))
     scene.activeCamera = fpsCamera
     const { root: fpsWeapon, flash: fpsFlash } = createFieldRifle(scene, fpsCamera, currentPlayers.find(p=>p.id===localId)?.characterClass ?? 'Fighter',setEquipmentStatus)
     // Production-style antialiasing / tonemapping pipeline. The FPS and
@@ -857,6 +858,12 @@ const glow =
     }
 
     const inputState=new CombatInput(fpsCamera.rotation.y,fpsCamera.rotation.x)
+    let arrivalLookTarget:Vector3|null=null,arrivalSurface=false,arrivalSurfaceStage=0
+    const onArrivalStage=(event:Event)=>{
+      const stage=(event as CustomEvent<number>).detail
+      if(stage>=2){arrivalSurface=true;arrivalSurfaceStage=stage;fpsWeapon.setEnabled(false);arrivalLookTarget=stage===2?new Vector3(10,1.7,47):new Vector3(25,1.2,55)}
+    }
+    window.addEventListener('kyrevant-arrival-stage',onArrivalStage)
     let mouseSessionActive = false
     let hasCapturedClick = false
     let cursorReleased = false
@@ -1073,7 +1080,7 @@ const glow =
     const scannedGround = new PBRMaterial('kyrevant-scanned-ground-pbr', scene)
     scannedGround.metallic = 0.0
     scannedGround.roughness = 0.94
-    scannedGround.albedoColor = new Color3(.68, .63, .52)
+    scannedGround.albedoColor = new Color3(.92, .90, .84)
     const groundAlbedo = new Texture(
       KYREVANT_GROUND_COLOR_URL, scene, true, false,
       Texture.TRILINEAR_SAMPLINGMODE,
@@ -1091,7 +1098,7 @@ const glow =
     )
     groundNormal.uScale = groundAlbedo.uScale
     groundNormal.vScale = groundAlbedo.vScale
-    groundNormal.level = .72
+    groundNormal.level = .16
     scannedGround.bumpTexture = groundNormal
     } catch (error) {
       // Texture initialization is optional and must never disable controls.
@@ -2330,6 +2337,10 @@ const glow =
           if(chapterRelicLight)chapterRelicLight.emissiveColor=Color3.FromHexString(chapterRelicRecovered?'#347947':activeChapter===2?'#327d79':'#805a25')
         }
         if((combatPaused.current||commandModeRef.current||!socket.connected)&&weaponMotion.aimed){weaponMotion.release();setAiming(false)}
+        if(arrivalSurface){
+          if(!combatPaused.current){arrivalSurface=false;arrivalLookTarget=null;fpsWeapon.setEnabled(true)}
+          else if(arrivalLookTarget){const delta=arrivalLookTarget.subtract(fpsCamera.position),yaw=Math.atan2(delta.x,delta.z),pitch=-Math.atan2(delta.y,Math.hypot(delta.x,delta.z)),blend=1-Math.exp(-engine.getDeltaTime()*.0018);inputState.heading+=Math.atan2(Math.sin(yaw-inputState.heading),Math.cos(yaw-inputState.heading))*blend;inputState.pitch+=(pitch-inputState.pitch)*blend;fpsCamera.rotation.set(inputState.pitch,inputState.heading,0)}
+        }
         const motion=weaponMotion.update(engine.getDeltaTime()/1000,Boolean(inputState.keys.w||inputState.keys.a||inputState.keys.s||inputState.keys.d))
         fpsWeapon.position.set(motion.x,motion.y,motion.z);fpsWeapon.rotation.x=motion.pitch;fpsWeapon.rotation.z=motion.roll;fpsCamera.fov=motion.fov
         for(const [id,time] of defeatedAt){const visual=enemyVisuals.get(id);if(!visual)continue;const t=Math.min(1,(performance.now()-time)/600);visual.root.rotation.z=t*Math.PI*.48;visual.root.position.y=frontierHeight(visual.root.position.x,visual.root.position.z)-t*.22;if(t===1)visual.root.setEnabled(false)}
@@ -2350,7 +2361,7 @@ const glow =
           if (commandModeRef.current) {
             camera.setTarget(position)
           } else {
-            const eye=position.add(new Vector3(0,1.65,0))
+            const eye=position.add(arrivalSurface&&combatPaused.current&&arrivalSurfaceStage===2?new Vector3(0,4.5,10):new Vector3(0,1.65,0))
             if(Vector3.DistanceSquared(fpsCamera.position,eye)>64)fpsCamera.position.copyFrom(eye)
             else Vector3.LerpToRef(fpsCamera.position,eye,1-Math.exp(-Math.min(engine.getDeltaTime(),100)*.025),fpsCamera.position)
           }
@@ -2527,6 +2538,7 @@ const glow =
         resize,
       )
       camera.detachControl()
+      window.removeEventListener('kyrevant-arrival-stage',onArrivalStage)
       window.removeEventListener('mouseup', releaseTrigger)
       window.removeEventListener('kyrevant-touch', handleTouch)
       window.removeEventListener('blur', releaseTrigger)

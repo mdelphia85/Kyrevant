@@ -38,3 +38,8 @@ The source creators' model-license metadata was checked on October 30, 2026. Cre
 
 ## Original induction weapons and frontier terrain
 The K-7 Vanguard, K-3 Wraith, S-4 Warden and A-9 Lance bodies are original geometry built for Kyrevant. The credited authored gun models supply hand rigs and reference transforms; their modern weapon meshes are hidden in this release. Surface maps retain the credits above. The terrain height field, supply routes, vegetation cards, colony modules and rescue-plan logic are original project code.
+
+## Frontier silt terrain
+`public/assets/frontier-silt-v1.webp` was generated specifically for Kyrevant with OpenAI image generation, then converted to WebP for the game. Original output is preserved locally in `source-artifacts/frontier-silt-original.png`. This new albedo texture is used for the dusty ground and rock surfaces; existing normal-map credits above remain applicable.
+
+`public/assets/frontier-cliff-v1.webp` is a second project-generated basalt/slate albedo material, generated with OpenAI image generation and converted to WebP. Original output is preserved locally in `source-artifacts/frontier-cliff-original.png`.

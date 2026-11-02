@@ -65,3 +65,6 @@ Run `npm run test:input` to verify held movement while turning, diagonal speed, 
 Hold right click to focus aim, press Z to toggle it, or tap AIM on touch devices. Weapon recoil/sway and hit feedback are visual; authoritative damage remains on the server. Construction shows a green/red structure preview and the reason placement is unavailable. A build returns to combat after the server confirms construction; rejection keeps the preview open. The shared placement rules enforce cost, range, map boundaries and spacing.
 
 Run `npm run test:combat` for motion and placement checks, `npm run test:recovery` for refresh/session recovery, and `npm run test:campaign` for the full multiplayer campaign.
+
+## Crash-site opening and visual materials
+The transport impact now cuts to the actual world for the surface reveal. The camera frames the crashed ship, then turns toward the lantern-marked note. Physical amber route markers lead to the warm-lit refuge entrance, and the next objective follows the note to Elias. Generated silt and basalt materials replace the repeated gravel look, with new fractured rock silhouettes and a slimmer weapon receiver/optic. Generated terrain credits are included in CREDITS.md and the in-game credits page.

@@ -10,7 +10,7 @@ type Room = { code:string; players:Player[]; enemies:Enemy[]; phase:'lobby'|'cla
 type Response = {success:boolean; message?:string; room?:Room; roomCode?:string;resumeToken?:string}
 const endpoint = import.meta.env.VITE_SERVER_URL || (import.meta.env.DEV ? `${window.location.protocol}//${window.location.hostname}:3001` : window.location.origin)
 const socket = io(endpoint, {timeout:20000, reconnection:true, reconnectionDelay:1000, reconnectionDelayMax:5000})
-const CLIENT_BUILD='2026-10-31.2'
+const CLIENT_BUILD='2026-11-02.1'
 
 function Briefing() {
   return <details className="mission-rules"><summary>Mission briefing &amp; how to play</summary>

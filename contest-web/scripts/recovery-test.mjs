@@ -24,7 +24,7 @@ try{
   }
   const note=once(host,'kyrevant-dialogue');host.emit('interact',code);await note
   host.emit('kyrevant-dialogue-choice',{roomCode:code,site:'flightLog',choice:'download'});await sleep(100)
-  room=await state(host);assert.equal(room.questFlags.crashLogRecovered,true)
+  const nextObjective=once(host,'kyrevant-chapter-state');room=await state(host);assert.equal(room.questFlags.crashLogRecovered,true);assert.equal((await nextObjective).title,'FIND ELIAS')
   const before=room.players.find(p=>p.id===host.id),oldId=host.id
   const offline=once(guest,'room-updated');host.disconnect();assert.equal((await offline).players.find(p=>p.id===oldId).connected,false)
   const replacement=await open()

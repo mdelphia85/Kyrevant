@@ -1,5 +1,5 @@
 import {frontierHeight} from '../world'
-import { Color3, Color4, DynamicTexture, Matrix, Mesh, MeshBuilder, ParticleSystem, PBRMaterial, Quaternion, Scene, SceneLoader, ShadowGenerator, StandardMaterial, Texture, TransformNode, Vector3, VertexBuffer, VertexData } from '@babylonjs/core'
+import { Color3, Color4, DynamicTexture, Matrix, Mesh, MeshBuilder, ParticleSystem, PBRMaterial, PointLight, Quaternion, Scene, SceneLoader, ShadowGenerator, StandardMaterial, Texture, TransformNode, Vector3, VertexBuffer, VertexData } from '@babylonjs/core'
 import { armorPanel, beamBetween, fieldMetal } from './FieldGeometry'
 
 // Base mission coordinates are kept intact; the frontier now spans 130 x 80 metres.
@@ -17,52 +17,78 @@ export function buildFrontierWorld(scene:Scene,shadows:ShadowGenerator){
   const wallColor=new Texture('/assets/detailed/concrete-color.webp',scene);wallColor.uScale=3;wallColor.vScale=2
   const wallNormal=new Texture('/assets/detailed/concrete-normal.webp',scene);wallNormal.uScale=3;wallNormal.vScale=2
   cream.albedoTexture=wallColor;cream.bumpTexture=wallNormal;cream.albedoColor=new Color3(.40,.52,.54);cream.roughness=.82
+  steel.albedoColor=new Color3(.76,.80,.80);steel.metallic=.6;steel.roughness=.56
+  dark.albedoColor=new Color3(.18,.23,.25);dark.metallic=.4
+  const flightCeramic=fieldMetal(scene,'transport-flight-ceramic','#a9b6b8',.55,.5)
   const rubber=fieldMetal(scene,'seals','#171e1c',.05,.95)
   const glass=new PBRMaterial('glazed-viewport',scene);glass.albedoColor=new Color3(.11,.21,.22);glass.metallic=.65;glass.roughness=.14
   const lamp=fieldMetal(scene,'warm-practical-lights','#c9b38a',.2,.45);lamp.emissiveColor=new Color3(.45,.3,.12)
-  const soil=new PBRMaterial('weathered-rocks',scene);soil.albedoTexture=new Texture('/assets/rock-ground-color.webp',scene);soil.bumpTexture=new Texture('/assets/rock-ground-normal.webp',scene);soil.albedoColor=new Color3(.47,.49,.43);soil.metallic=0;soil.roughness=.98
+  const soil=new PBRMaterial('weathered-rocks',scene);soil.albedoTexture=new Texture('/assets/frontier-cliff-v1.webp',scene);soil.bumpTexture=new Texture('/assets/rock-ground-normal.webp',scene);soil.albedoColor=new Color3(.62,.67,.65);soil.bumpTexture.level=.22;soil.metallic=0;soil.roughness=.98
   const panel=(name:string,w:number,h:number,d:number,x:number,y:number,z:number,mat:PBRMaterial,parent=root)=>{const m=armorPanel(scene,name,w,h,d,.07,parent);m.position.set(x,y,z);m.material=mat;shadows.addShadowCaster(m);return m}
   const cylinder=(name:string,diameter:number,height:number,x:number,y:number,z:number,mat:PBRMaterial,parent=root)=>{const m=MeshBuilder.CreateCylinder(name,{diameter,height,tessellation:24},scene);m.parent=parent;m.position.set(x,y,z);m.material=mat;m.isPickable=false;m.receiveShadows=true;shadows.addShadowCaster(m);return m}
   const at=(x:number,z:number)=>new Vector3(x*FRONTIER_SCALE,0,z*FRONTIER_SCALE)
   const rand=(i:number)=>{const v=Math.sin(i*127.1+21.3)*43758.5453;return v-Math.floor(v)}
   function rock(name:string,x:number,z:number,w:number,h:number,d:number){
     const m=MeshBuilder.CreateSphere(name,{diameter:2,segments:12,updatable:true},scene)
-    const positions=m.getVerticesData(VertexBuffer.PositionKind)!,indices=m.getIndices()!
-    for(let n=0;n<positions.length;n+=3){const x=positions[n],y=positions[n+1],z=positions[n+2];const v=1+Math.sin(x*8+z*7)*.10+Math.cos(y*11+x*3)*.08;positions[n]*=v;positions[n+1]*=v;positions[n+2]*=v}
+    const positions=m.getVerticesData(VertexBuffer.PositionKind)!,indices=m.getIndices()!,seed=rand(x*1.7+z*3.1)*Math.PI*2
+    for(let n=0;n<positions.length;n+=3){
+      const px=positions[n],py=positions[n+1],pz=positions[n+2]
+      const fracture=1+Math.sin(px*7+pz*5+seed)*.11+Math.cos(py*10+px*3+seed)*.09
+      const strata=1+Math.sin(Math.floor((py+1)*5)*2.1+seed)*.09
+      positions[n]=Math.sign(px)*Math.pow(Math.abs(px),.68)*fracture*strata
+      positions[n+1]=py*.45+Math.round(py*6)/6*.55
+      positions[n+2]=Math.sign(pz)*Math.pow(Math.abs(pz),.72)*fracture*strata
+    }
     m.updateVerticesData(VertexBuffer.PositionKind,positions);const normals:number[]=[];VertexData.ComputeNormals(positions,Array.from(indices),normals);m.updateVerticesData(VertexBuffer.NormalKind,normals)
     m.parent=root;m.position.set(x,frontierHeight(x,z)+Math.max(.05,h*.25),z);m.scaling.set(w,h,d);m.material=soil;m.rotation.y=rand(x+z)*6;m.isPickable=false;m.receiveShadows=true;shadows.addShadowCaster(m);return m
   }
-  // The transport is behind and to the left of the player, leaving the note approach clear.
-  const wreck=new TransformNode('crashed-unit-transport',scene);wreck.parent=root;wreck.position=at(4.4,28.7);wreck.rotation.set(.08,.42,-.13)
+  // The transport is ahead and to the left of the surviving unit, leaving the note approach clear.
+  const wreck=new TransformNode('crashed-unit-transport',scene);wreck.parent=root;wreck.position=at(4,18.8);wreck.rotation.set(.08,-.35,-.13)
   const fuselage=MeshBuilder.CreateCylinder('torn-open-fuselage',{height:14,diameter:4.6,tessellation:24,arc:.73,enclose:true,cap:Mesh.NO_CAP},scene);fuselage.parent=wreck;fuselage.position.y=1.2;fuselage.rotation.x=Math.PI/2;fuselage.rotation.z=.5;fuselage.material=steel;shadows.addShadowCaster(fuselage)
   panel('transport-lower-keel',3.5,.45,14,0,.05,0,dark,wreck)
   for(let i=0;i<8;i++){
     const ring=MeshBuilder.CreateTorus(`exposed-frame-${i}`,{diameter:4.45,thickness:.10,tessellation:32},scene);ring.parent=wreck;ring.position.set(0,1.2,-6.2+i*1.65);ring.rotation.x=Math.PI/2;ring.material=rust;shadows.addShadowCaster(ring)
     for(const side of [-1,1])panel(`hull-armor-${side}-${i}`,.16,1.25,1.45,side*2.17,.9,-6.2+i*1.65,i%3===0?dark:green,wreck)
   }
-  const nose=MeshBuilder.CreateSphere('buried-cockpit',{diameter:4.5,segments:20},scene);nose.parent=wreck;nose.position.set(0,.8,7.1);nose.scaling.set(1,.65,1.25);nose.material=dark;shadows.addShadowCaster(nose)
+  const nose=MeshBuilder.CreateSphere('buried-cockpit',{diameter:4.5,segments:20},scene);nose.parent=wreck;nose.position.set(0,.8,7.1);nose.scaling.set(1,.65,1.25);nose.material=flightCeramic;shadows.addShadowCaster(nose)
   for(const side of [-1,1]){
-    const window=panel(`cracked-cockpit-glass-${side}`,1.7,.7,.12,side*.9,1.62,8.5,glass,wreck);window.rotation.y=side*.3
-    const wing=panel(`sheared-delta-wing-${side}`,5.8,.20,4.4,side*4.05,.6,-1.4,steel,wreck);wing.rotation.y=side*.47;wing.rotation.z=side*.15
+    const window=panel(`cracked-cockpit-glass-${side}`,1.7,.7,.12,side*.9,1.72,9.6,glass,wreck);window.rotation.y=side*.3
+    const wing=panel(`sheared-delta-wing-${side}`,5.8,.20,4.4,side*4.05,.6,-1.4,flightCeramic,wreck);wing.rotation.y=side*.47;wing.rotation.z=side*.15
     for(let k=0;k<3;k++)beamBetween(scene,`wing-rib-${side}-${k}`,new Vector3(side*1.9,.7,-3+k*1.1),new Vector3(side*6.2,.45,-2+k*.65),.10,wreck,dark)
     const engine=cylinder(`turbine-body-${side}`,1.5,4.4,side*2.4,1.4,-4.8,dark,wreck);engine.rotation.x=Math.PI/2
     const exhaust=MeshBuilder.CreateTorus(`turbine-rim-${side}`,{diameter:1.42,thickness:.11,tessellation:28},scene);exhaust.parent=wreck;exhaust.position.set(side*2.4,1.4,-7.05);exhaust.rotation.x=Math.PI/2;exhaust.material=steel
     for(let k=0;k<10;k++){const blade=panel(`turbine-blade-${side}-${k}`,.50,.05,.18,side*2.4+Math.sin(k*.628)*.4,1.4+Math.cos(k*.628)*.4,-7,dark,wreck);blade.rotation.z=k*.628}
   }
+  panel('cockpit-armored-brow',3.4,.16,.24,0,2.1,9.45,dark,wreck)
+  const fin=panel('transport-tail-fin',.18,2.9,2.8,0,2.7,-5.3,flightCeramic,wreck);fin.rotation.z=-.18
+  const hullMark=sign('transport-unit-marking','UNIT 07',0,0,0,2.7);hullMark.parent=wreck;hullMark.position.set(2.32,1.1,1);hullMark.rotation.set(0,-Math.PI/2,0)
   for(let i=0;i<22;i++){
-    const x=10+rand(i)*13,z=60+rand(i+50)*17
+    const x=9+rand(i)*13,z=39+rand(i+50)*20
     const shard=panel(`torn-hull-debris-${i}`,.3+rand(i+70)*1.5,.04,.4+rand(i+90)*1.2,x,.05,z,i%2?steel:dark);shard.rotation.set(rand(i+5)*.3,rand(i+4)*6,rand(i+3)*.2)
   }
   const scorchTex=new DynamicTexture('impact-scorch',{width:256,height:256},scene,false)
   const ctx=scorchTex.getContext(),gradient=ctx.createRadialGradient(128,128,10,128,128,128);gradient.addColorStop(0,'rgba(10,11,9,.88)');gradient.addColorStop(.55,'rgba(20,17,12,.55)');gradient.addColorStop(1,'rgba(20,17,12,0)');ctx.fillStyle=gradient;ctx.fillRect(0,0,256,256);scorchTex.hasAlpha=true;scorchTex.update()
   const scorchMat=new StandardMaterial('burned-ground',scene);scorchMat.diffuseTexture=scorchTex;scorchMat.useAlphaFromDiffuseTexture=true;scorchMat.specularColor=Color3.Black();scorchMat.disableLighting=true;scorchMat.emissiveColor=new Color3(.55,.5,.4)
-  const scorch=MeshBuilder.CreateGround('long-impact-scar',{width:13,height:27},scene);scorch.parent=root;scorch.position.set(12,.035,68);scorch.rotation.y=.4;scorch.material=scorchMat;scorch.isPickable=false
+  const scorch=MeshBuilder.CreateGround('long-impact-scar',{width:13,height:27},scene);scorch.parent=root;scorch.position.set(10,.035,47);scorch.rotation.y=.4;scorch.material=scorchMat;scorch.isPickable=false
   // Scaled, weathered rock with a physical paper note.
   rock('plea-rock',25,55,1.4,.85,1.1)
   const paper=new DynamicTexture('handwritten-plea',{width:512,height:512},scene,false);const pc=paper.getContext();pc.fillStyle='#c8bb91';pc.fillRect(0,0,512,512);pc.fillStyle='#37392e';pc.font='italic 35px serif';['If anyone sees this,','please come to the','LAST LIGHT REFUGE.','','They took everyone.','We need help.','— Elias'].forEach((line,i)=>pc.fillText(line,30,65+i*57));paper.update()
   const paperMat=new StandardMaterial('old-paper',scene);paperMat.diffuseTexture=paper;paperMat.specularColor=Color3.Black();paperMat.backFaceCulling=false
-  const note=MeshBuilder.CreatePlane('physical-note',{width:.65,height:.65},scene);note.parent=root;note.position.set(25,1.13,55);note.rotation.set(Math.PI/2,.2,0);note.material=paperMat
+  const note=MeshBuilder.CreatePlane('physical-note',{width:.65,height:.65},scene);note.parent=root;note.position.set(24.7,1.28,55.5);note.rotation.set(.25,-.8,.03);note.material=paperMat
   function sign(name:string,text:string,x:number,y:number,z:number,width:number){const texture=new DynamicTexture(`${name}-ink`,{width:1024,height:256},scene,false);const c=texture.getContext();c.fillStyle='#202a28';c.fillRect(0,0,1024,256);c.strokeStyle='#8f9577';c.lineWidth=6;c.strokeRect(14,14,996,228);c.fillStyle='#d7d5b8';c.font='bold 65px monospace';(c as CanvasRenderingContext2D).textAlign='center';c.fillText(text,512,145);texture.update();const material=new StandardMaterial(`${name}-sign-material`,scene);material.diffuseTexture=texture;material.emissiveColor=new Color3(.1,.1,.08);material.specularColor=Color3.Black();material.backFaceCulling=false;const plane=MeshBuilder.CreatePlane(name,{width,height:width/4},scene);plane.parent=root;plane.position.set(x,y,z);plane.rotation.y=Math.PI;plane.material=material;return plane}
+  // A real rescue trail: the note lantern, low route lights and readable physical signs.
+  const amber=fieldMetal(scene,'emergency-amber','#d2a05a',.35,.36);amber.emissiveColor=new Color3(.72,.32,.045)
+  const noteLight=new PointLight('note-emergency-lantern',new Vector3(24,1.55,55.5),scene);noteLight.diffuse=new Color3(1,.58,.25);noteLight.intensity=1.4;noteLight.range=7
+  panel('note-lantern-foot',.32,.12,.32,24,.24,55.5,dark)
+  cylinder('note-lantern-cage',.20,.38,24,.5,55.5,steel)
+  cylinder('note-lantern-glass',.17,.25,24,.51,55.5,amber)
+  for(const [index,[x,z]] of [[29,50],[39,43],[49,35],[57.5,30]].entries()){
+    const y=frontierHeight(x,z)
+    cylinder(`refuge-route-post-${index}`,.10,1.45,x,y+.725,z,steel)
+    panel(`refuge-route-lamp-${index}`,.16,.12,.16,x,y+1.5,z,amber)
+    const marker=sign(`refuge-route-sign-${index}`,index===3?'LAST LIGHT REFUGE':'REFUGE  >',x,y+1.1,z,2.1)
+    marker.rotation.y=index===3?Math.PI:Math.PI-.6
+  }
   function habitat(name:string,bx:number,bz:number,width:number,depth:number,material:PBRMaterial){
     const x=bx*FRONTIER_SCALE,z=bz*FRONTIER_SCALE
     panel(`${name}-foundation`,width+.4,.35,depth+.4,x,.18,z,dark)
@@ -118,7 +144,15 @@ export function buildFrontierWorld(scene:Scene,shadows:ShadowGenerator){
   const routeMaterial=new StandardMaterial('ground-dust-and-ruts',scene);routeMaterial.diffuseTexture=routeTexture;routeMaterial.useAlphaFromDiffuseTexture=true;routeMaterial.specularColor=Color3.Black();routeMaterial.zOffset=-2
   const routesMesh=MeshBuilder.CreateGround('colony-supply-routes',{width:130,height:80,subdivisions:128,updatable:true},scene);routesMesh.parent=root;routesMesh.position.set(65,.06,40);routesMesh.material=routeMaterial;routesMesh.isPickable=false
   const routeVertices=routesMesh.getVerticesData(VertexBuffer.PositionKind)!;for(let i=0;i<routeVertices.length;i+=3)routeVertices[i+1]=frontierHeight(routeVertices[i]+65,routeVertices[i+2]+40);routesMesh.updateVerticesData(VertexBuffer.PositionKind,routeVertices)
-  sign('refuge-sign','LAST LIGHT REFUGE',refuge.x,3.55,refuge.z+4.16,4.4)
+  sign('refuge-sign','LAST LIGHT REFUGE',refuge.x,3.55,refuge.z+4.16,5.2)
+  const refugeLight=new PointLight('refuge-welcome-lamp',new Vector3(refuge.x,3.1,refuge.z+4.7),scene);refugeLight.diffuse=new Color3(1,.66,.34);refugeLight.intensity=2;refugeLight.range=12
+  for(const side of [-1,1]){
+    panel('refuge-entry-arch',.34,5.6,.55,refuge.x+side*2.2,2.8,refuge.z+5.6,steel)
+    const awning=panel('refuge-angled-canopy',2.8,.18,3,refuge.x+side*1.1,5.55,refuge.z+4.5,dark);awning.rotation.z=-side*.12
+    panel('refuge-warm-beacon',.22,.8,.22,refuge.x+side*2.2,5.5,refuge.z+5.6,amber)
+    for(let i=0;i<4;i++)panel('refuge-armored-rib',.11,3.5,.15,refuge.x+side*(3+i*.65),2.2,refuge.z+4.15,steel)
+  }
+  sign('refuge-beacon-sign','SAFE HAVEN',refuge.x,5.05,refuge.z+5.95,3.6)
   habitat('abandoned-colony-habitat',27,7,8,6,cream)
   habitat('resistance-headquarters',34,9.5,12,8,green)
   sign('resistance-sign','FRONTIER RESISTANCE',85,3.5,27.98,5)
@@ -205,7 +239,7 @@ export function buildFrontierWorld(scene:Scene,shadows:ShadowGenerator){
   }
   grass.thinInstanceSetBuffer('matrix',new Float32Array(transforms),16,true);grass.parent=root
   const soft=new DynamicTexture('soft-wreck-plume',{width:64,height:64},scene,false);const sc=soft.getContext(),sg=sc.createRadialGradient(32,32,0,32,32,32);sg.addColorStop(0,'#ffffff88');sg.addColorStop(.5,'#ffffff30');sg.addColorStop(1,'#ffffff00');sc.fillStyle=sg;sc.fillRect(0,0,64,64);soft.hasAlpha=true;soft.update()
-  const smoke=new ParticleSystem('wreck-smoke',100,scene);smoke.particleTexture=soft;smoke.emitter=new Vector3(11,1.5,70);smoke.minEmitBox=new Vector3(-1,0,-2);smoke.maxEmitBox=new Vector3(1,0,2);smoke.color1=new Color4(.13,.14,.13,.25);smoke.color2=new Color4(.20,.21,.19,.12);smoke.colorDead=new Color4(.2,.21,.2,0);smoke.minSize=1;smoke.maxSize=3;smoke.minLifeTime=4;smoke.maxLifeTime=7;smoke.emitRate=9;smoke.direction1=new Vector3(.3,1,0);smoke.direction2=new Vector3(.8,1.5,.3);smoke.blendMode=ParticleSystem.BLENDMODE_STANDARD;smoke.start()
+  const smoke=new ParticleSystem('wreck-smoke',100,scene);smoke.particleTexture=soft;smoke.emitter=new Vector3(10,1.5,47);smoke.minEmitBox=new Vector3(-1,0,-2);smoke.maxEmitBox=new Vector3(1,0,2);smoke.color1=new Color4(.13,.14,.13,.25);smoke.color2=new Color4(.20,.21,.19,.12);smoke.colorDead=new Color4(.2,.21,.2,0);smoke.minSize=1;smoke.maxSize=3;smoke.minLifeTime=4;smoke.maxLifeTime=7;smoke.emitRate=9;smoke.direction1=new Vector3(.3,1,0);smoke.direction2=new Vector3(.8,1.5,.3);smoke.blendMode=ParticleSystem.BLENDMODE_STANDARD;smoke.start()
   // Merge static surfaces by material: the frontier stays within a phone's draw-call budget.
   const staticGroups=new Map<PBRMaterial,Mesh[]>()
   root.getChildMeshes().forEach(mesh=>{
