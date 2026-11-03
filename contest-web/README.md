@@ -47,7 +47,7 @@ The build checks client and server TypeScript. The smoke test checks two-client 
 
 See [DEPLOY.md](DEPLOY.md). `render.yaml` configures one free Render Node web service serving both the built client and multiplayer server. In the GitHub Unity repository, this browser edition is placed under `contest-web/`.
 
-Free Render instances sleep after 15 idle minutes, and the next load can take about a minute. Rooms live in memory and reset when the server restarts. Socket.IO transport recovery lasts 45 seconds; a private saved-character token also restores the same character after refresh or disconnects of up to ten minutes. No database is needed for an active match.
+Free Render instances sleep after 15 idle minutes, and the next load can take about a minute. Rooms live in memory and reset when the server restarts. Device checkpoints autosave every 15 seconds and can restore a campaign into a new room after a restart. Download a backup through How to Play, and import it on the title screen to transfer it to another device. Socket.IO transport recovery lasts 45 seconds; a private saved-character token also restores the same character after refresh or disconnects of up to ten minutes while the room remains alive.
 
 ## Technology and assets
 
@@ -75,3 +75,15 @@ At rank two, open Mission Log and choose one permanent path for this campaign. F
 Militia troops approach around terrain that blocks sight, circle at firing distance, and briefly pull back when threatened. Heavy troops favor holding their firing position. These tactics use terrain sight tests and home-area limits, not a full navigation mesh. Cleric healing respects every lineage and rank maximum.
 
 Run `node --import tsx scripts/progression-tactics-test.mjs` for healing, path validation and enemy movement checks. The campaign test also verifies rank requirements, class restrictions, shield bonuses, chapter preservation and replay reset.
+
+## Campaign expansion · 2026-11-02.3
+
+Weapons have class-specific magazines, server-authoritative ammunition, automatic empty reloads and manual reloads with R or the touch button. Reload motion, layered weapon audio, enemy interpolation and hit reactions improve combat feedback. The frontier adds instanced curved vegetation, refuge bunks and a map table, and an exposed transport cargo bay.
+
+Captain Vale offers Bastion (+80 initial structure hull) or Reclaimer (double passive resource production). Sera offers a commander-weakening artifact choice or a Wizard/Monk study option that grants energy. Jonah offers a final commander shutdown or civilian grid restoration that recharges the squad. Choices are shared and appear in the journal and ending.
+
+Open Build Base to repair nearby structures for 25 minerals or upgrade them through level three. Upgrades increase hull and the structure's production, healing or turret damage. Settlement assault troops can damage and destroy the base. Phone controls have an analog movement stick, independent drag aiming and a reload button. How to Play offers a Performance graphics setting. Phone-width layout has been checked in a browser; physical-phone performance and multitouch remain unverified.
+
+Every connected player receives a device checkpoint with their character first. Continue saved campaign creates a fresh room and restores characters, objectives, enemies, structures, resources and choices. Friends join that code to reclaim the remaining characters; restored combat waits for two connected players. Saves refill ammunition, redeploy downed characters with at least 35 health and reset temporary interaction/reload timers. Mining deposits are unlimited and recreated from the chapter definition. Saved files are portable cooperative game data, without socket identities or recovery secrets. Local storage can be cleared by the browser, so keep a downloaded backup.
+
+Run `npm run test:expansion` for magazines, analog input, repair/upgrade rules, imported-save validation, an actual server restart and restoration, friend reclaim, shared structure damage and story rewards. The test launches a disposable local server on port 3117.

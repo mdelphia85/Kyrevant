@@ -1,3 +1,6 @@
+import {makeCheckpoint,readCheckpoint} from '../src/checkpoint.ts'
+import {maintainBuilding} from '../src/baseStrategy.ts'
+import {weaponSpec,beginReload,completeReload,spendRound} from '../src/weapons.ts'
 import {chosenPath,shieldTalentBonus,abilityTuning,pulseRecovery} from '../src/progression.ts'
 import {enemyTactic} from '../src/enemyTactics.ts'
 import { BUILD_COSTS, placementProblem } from '../src/buildRules.ts'
@@ -48,11 +51,13 @@ type Player = {
   xp?: number
   rank?: number
   weaponTier?: number
+  ammo?:number
+  reloadUntil?:number
   talent?: string
   species?: Species
   lastDamagedAt?: number
   dialogueUntil?: number
-  dialogueSite?: ChapterSite
+  dialogueSite?: string
 }
 type Enemy = {
   id: string
@@ -84,6 +89,7 @@ type Building = {
   y: number
   health: number
   maxHealth: number
+  level?:number
   lastVisualAt?: number
 }
 type QuestObjective = {
@@ -113,6 +119,11 @@ type Room = {
   gameStarted: boolean
   phase: GamePhase
   level: number
+  restoredCampaign?:boolean
+  lastCheckpointAt?:number
+  doctrine?:'bastion'|'reclaimer'
+  relicChoice?:'disable'|'study'
+  citadelChoice?:'shutdown'|'restore'
   wipeAt?: number
   minedMinerals?: number
   defenseWave?: number
@@ -143,7 +154,7 @@ const httpServer =
 const io = new Server(
   httpServer,
   {
-    maxHttpBufferSize: 16384,
+    maxHttpBufferSize: 131072,
     connectionStateRecovery: { maxDisconnectionDuration: 45000, skipMiddlewares: true },
     cors: {
       // Restrict production clients with CLIENT_ORIGINS (comma-separated URLs).
@@ -288,6 +299,7 @@ function assignSpawnPoints(
       player.facingX = 1
       player.facingY = 0
       const lineage = species.find(option => option.name === player.species) ?? species[0]
+      player.ammo=weaponSpec(player.characterClass).magazine;player.reloadUntil=0
       player.maxHealth = lineage.health + ((player.rank ?? 1)-1)*12
       player.maxShield = lineage.shield + ((player.rank ?? 1)-1)*8 + shieldTalentBonus(player.characterClass,player.talent)
       player.health = player.maxHealth
@@ -1003,9 +1015,9 @@ const chapterOneSites = {
 } as const
 type ChapterSite = keyof typeof chapterOneSites
 type DialogueOption = { id: string; label: string }
-function notifyPlayer(player: Player, site: ChapterSite, speaker: string,
+function notifyPlayer(player: Player, site: string, speaker: string,
                       title: string, lines: string[], choices: DialogueOption[]) {
-  if (['flightLog','innkeeper','resistance'].includes(site)) {
+  if (['flightLog','innkeeper','resistance','artifact','citadel'].includes(site)) {
     player.dialogueSite = site
     player.dialogueUntil = Date.now() + 60000
   }
@@ -1151,7 +1163,7 @@ function chapterDialogue(room: Room, player: Player, site: ChapterSite) {
       display('CAPTAIN VALE','JOIN THE RESISTANCE',[
         'The occupation army is building toward the Citadel. They will march on this town at dusk.',
         'Mining stations are still operational. Gather minerals, build an extractor and a turret, then signal us from the defense radio.',
-      ],[{id:'alliance',label:'Join the resistance and prepare defenses'},{id:'ask_history',label:'What is the Citadel?'},leave])
+      ],[{id:'alliance',label:'Bastion pact — reinforce every structure (+80 hull)'},{id:'reclaimer',label:'Reclaimer pact — double passive mining and reactor output'},{id:'ask_history',label:'What is the Citadel?'},leave])
     } else display('CAPTAIN VALE','HOLD THE SETTLEMENT',[
       f.raidLaunched ? 'Hold all three attacks. If we survive, the occupation commander must fall.' :
         'Get the extractor and turret operational. Use the radio west of this shelter to begin the defense.',
@@ -1179,6 +1191,45 @@ function chapterDialogue(room: Room, player: Player, site: ChapterSite) {
     }
   }
 }
+function ancientDialogue(room:Room,player:Player,site:'artifact'|'citadel'){
+  if(site==='artifact'?room.questFlags.artifactRecovered:room.questFlags.citadelCoreActivated){
+    notifyPlayer(player,site,site==='artifact'?'SERA · AELARI ARCHIVIST':'JONAH · FREED ENGINEER','YOUR DECISION STANDS',[
+      site==='artifact'?(room.relicChoice==='study'?'The key is preserved. Its recovered energy belongs to the resistance.':'The militia link is severed. The frontier commander has lost its protection.'):(room.citadelChoice==='restore'?'The civilian grid is restored. Finish the fight for Kyrevant.':'Veyr has lost the command channel. Finish the fight together.'),
+    ],[{id:'leave',label:'Return to the mission'}]);return
+  }
+  if(site==='artifact')notifyPlayer(player,site,'SERA · AELARI ARCHIVIST','THE BURIED COMMAND KEY',[
+    'Sera answers over the salvaged radio: Veyr made the captive engineers uncover this key. Its signal binds his frontier shield to the buried machines.',
+    'Break its military channel and his commander loses armor. Or let your specialist study the lattice: the resistance can recover energy without destroying its history.',
+  ],[{id:'disable',label:'Sever the militia link — weaken the frontier commander'},...(room.players.some(p=>p.characterClass==='Wizard'||p.characterClass==='Monk')?[{id:'study',label:'[Wizard / Monk] Preserve the key — recover 90 energy'}]:[]),{id:'leave',label:'Decide later'}])
+  else notifyPlayer(player,site,'JONAH · FREED ENGINEER','A FUTURE FOR KYREVANT',[
+    'Jonah has reached the Citadel network: Veyr turned an ancient irrigation and defense system into a prison. Its original purpose was to keep this world alive.',
+    'We can burn out his command channel and weaken his armor, or restore the planetary grid. Restoration will refill your squad shields and give the settlements their power back.',
+  ],[{id:'shutdown',label:'Destroy the command channel — weaken Veyr'}, {id:'restore',label:'Restore the civilian grid — recharge the squad'}, {id:'leave',label:'Decide later'}])
+}
+function handleAncientChoice(room:Room,player:Player,input:{site:string;choice:string}){
+  const artifact=room.level===2&&input.site==='artifact',citadel=room.level===3&&input.site==='citadel'
+  if(!artifact&&!citadel)return false
+  if(room.phase!=='mission'||player.downed||distance(player.x,player.y,artifact?1850:1970,artifact?320:330)>140)return true
+  if(input.choice==='leave'){player.dialogueUntil=0;return true}
+  if(artifact){
+    if(room.questFlags.artifactRecovered||!['disable','study'].includes(input.choice))return true
+    if(input.choice==='study'&&!room.players.some(p=>p.characterClass==='Wizard'||p.characterClass==='Monk'))return true
+    room.relicChoice=input.choice as 'disable'|'study';room.questFlags.artifactRecovered=true
+    if(room.relicChoice==='study')grantResources(room,0,90)
+    else{const boss=room.enemies.find(e=>e.id==='l2-commander');if(boss?.alive)boss.health=Math.max(1,Math.round(boss.health*.75))}
+    rewardSquad(room,60)
+  }else{
+    if(room.questFlags.citadelCoreActivated||!['shutdown','restore'].includes(input.choice))return true
+    room.citadelChoice=input.choice as 'shutdown'|'restore';room.questFlags.citadelCoreActivated=true
+    if(room.citadelChoice==='restore')room.players.forEach(p=>p.shield=p.maxShield)
+    else{const boss=room.enemies.find(e=>e.id==='final-commander');if(boss?.alive)boss.health=Math.max(1,Math.round(boss.health*.75))}
+    rewardSquad(room,90)
+  }
+  player.dialogueUntil=0;io.to(room.code).emit('enemy-state',room.enemies);io.to(room.code).emit('player-state',room.players)
+  io.to(room.code).emit('campaign-decisions',{doctrine:room.doctrine,relicChoice:room.relicChoice,citadelChoice:room.citadelChoice})
+  io.to(room.code).emit('story-event',artifact?'SERA: The key is secure. The road to the Citadel is open.':room.citadelChoice==='restore'?'JONAH: Civilian power restored. Kyrevant can live again.':'JONAH: Veyr has lost the grid. Finish this together.')
+  updateQuestState(room);return true
+}
 function handleChapterOneInteraction(room: Room, player: Player): boolean {
   if (room.level !== 1 || room.phase !== 'mission') return false
   const site = findStorySite(player)
@@ -1187,7 +1238,8 @@ function handleChapterOneInteraction(room: Room, player: Player): boolean {
   return true
 }
 function handleChapterChoice(room: Room, player: Player,
-                             input:{site: ChapterSite; choice: string}) {
+                             input:{site: string; choice: string}) {
+  if(handleAncientChoice(room,player,input))return
   if (room.level !== 1 || room.phase !== 'mission' || player.downed) return
   const here = findStorySite(player)
   if (!here || input.site !== here) return
@@ -1230,12 +1282,13 @@ function handleChapterChoice(room: Room, player: Player,
     reply = `SURVIVORS SAVED · +50 minerals, +${f.rescueTactic==='relief'?70:40} energy, +80 XP. Jonah is safe. Captain Vale is waiting at the resistance headquarters.`
     accepted = true
   }
-  if (here === 'resistance' && input.choice === 'alliance' &&
+  if (here === 'resistance' && ['alliance','reclaimer'].includes(input.choice) &&
       f.civiliansRescued && !f.resistanceContacted) {
     f.resistanceContacted = true
+    room.doctrine=input.choice==='reclaimer'?'reclaimer':'bastion'
     rewardSquad(room, 50)
     grantResources(room, 40, 20)
-    reply = 'RESISTANCE ALLIANCE · +40 minerals, +20 energy. Mine 80 minerals; build an Extractor and Turret.'
+    reply = `${room.doctrine==='bastion'?'BASTION PACT · Structures gain 80 maximum hull.':'RECLAIMER PACT · Extractors and reactors produce double resources.'} +40 minerals, +20 energy. Mine 80 minerals; build an Extractor and Turret.`
     accepted = true
   }
   if (here === 'radio' && input.choice === 'begin_defense' &&
@@ -1252,6 +1305,7 @@ function handleChapterChoice(room: Room, player: Player,
     chapterDialogue(room, player, here)
     return
   }
+  io.to(room.code).emit('campaign-decisions',{doctrine:room.doctrine,relicChoice:room.relicChoice,citadelChoice:room.citadelChoice})
   io.to(room.code).emit('story-event', reply)
   updateQuestState(room)
   notifyPlayer(player, here, 'MISSION UPDATED',
@@ -1297,7 +1351,8 @@ function emitChapterSummary(room: Room) {
 }
 function dialogueProtected(player: Player) {
   if (!player.dialogueSite || Date.now() >= (player.dialogueUntil ?? 0)) return false
-  const shelter = chapterOneSites[player.dialogueSite]
+  const shelter = player.dialogueSite==='artifact'?{x:1850,y:320,radius:140}:player.dialogueSite==='citadel'?{x:1970,y:330,radius:140}:chapterOneSites[player.dialogueSite as ChapterSite]
+  if(!shelter)return false
   return distance(player.x,player.y,shelter.x,shelter.y) <= shelter.radius
 }
 function damagePlayer(
@@ -1361,12 +1416,12 @@ io.on(
   (socket: any) => {
     socket.use((packet: unknown[], next: (error?: Error) => void) => {
       const [event, data, callback] = packet as [string, any, any]
-      const requiresCode = ['start-game','set-ready','interact','use-ability','restart-campaign'].includes(event)
-      const requiresData = ['join-room','select-class','move-player','attack','mine-resource','build-structure','choose-talent'].includes(event)
+      const requiresCode = ['start-game','set-ready','interact','use-ability','reload-weapon','save-campaign','restart-campaign'].includes(event)
+      const requiresData = ['join-room','select-class','move-player','attack','mine-resource','build-structure','maintain-building','choose-talent'].includes(event)
       const invalid = (event === 'create-room' && typeof data !== 'string') ||
         (requiresCode && typeof data !== 'string') ||
         (requiresData && (!data || typeof data !== 'object' || typeof data.roomCode !== 'string')) ||
-        (['create-room','join-room','start-game','set-ready','resume-session','leave-room','choose-talent'].includes(event) && typeof callback !== 'function')
+        (['create-room','join-room','start-game','set-ready','resume-session','leave-room','maintain-building','save-campaign','restore-campaign','choose-talent'].includes(event) && typeof callback !== 'function')
       if (invalid) { if (typeof callback === 'function') callback({success:false,message:'Invalid request.'}); return }
       next()
     })
@@ -1401,6 +1456,35 @@ io.on(
       for(const room of rooms.values())if(room.players.some(player=>player.id===socket.id))socket.leave(room.code)
       removeFromParty(socket.id);callback({success:true})
     })
+    socket.on('save-campaign',(code:string,callback:(result:any)=>void)=>{
+      const room=rooms.get(code),player=room?.players.find(p=>p.id===socket.id)
+      if(!room||!player||!['mission','victory'].includes(room.phase)){callback({success:false,message:'Start a campaign before saving.'});return}
+      callback({success:true,checkpoint:makeCheckpoint(room,player.id)})
+    })
+    socket.on('restore-campaign',(data:{checkpoint:unknown;playerName?:string},callback:(result:any)=>void)=>{
+      if([...rooms.values()].some(room=>room.players.some(p=>p.id===socket.id))){callback({success:false,message:'Leave your current party before restoring a campaign.'});return}
+      try{
+        const save=readCheckpoint(data?.checkpoint),code=createRoomCode(),template=getLevelData(save.level)
+        const players:Player[]=save.players.map((p,index)=>{
+          const lineage=species.find(s=>s.name===p.species)!,maxHealth=lineage.health+(p.rank-1)*12,maxShield=lineage.shield+(p.rank-1)*8+shieldTalentBonus(p.characterClass,p.talent)
+          return {...p,characterClass:p.characterClass as CharacterClass,species:p.species as Species,id:index===0?socket.id:`saved-${randomBytes(8).toString('hex')}`,name:index===0&&typeof data.playerName==='string'&&data.playerName.trim()?data.playerName.trim().slice(0,20):p.name,isHost:index===0,connected:index===0,ready:true,maxHealth,maxShield,health:Math.min(maxHealth,Math.max(35,p.health)),shield:Math.min(maxShield,p.shield),downed:false,ammo:weaponSpec(p.characterClass).magazine,reloadUntil:0}
+        })
+        const room:Room={...save,code,players,enemies:save.enemies as Enemy[],buildings:save.buildings as Building[],quests:template.quests.map(q=>({...q,complete:save.quests.find(saved=>saved.id===q.id)?.complete??false})),resourceNodes:template.resourceNodes,phase:save.phase as GamePhase,questFlags:save.questFlags as Room['questFlags'],doctrine:save.doctrine as Room['doctrine'],relicChoice:save.relicChoice as Room['relicChoice'],citadelChoice:save.citadelChoice as Room['citadelChoice'],gameStarted:true,restoredCampaign:true,lastEconomyAt:Date.now()}
+        rooms.set(code,room);socket.join(code);callback({success:true,room,roomCode:code,resumeToken:issueRecovery(socket,code)})
+      }catch(error){callback({success:false,message:error instanceof Error?error.message:'Unable to restore this checkpoint.'})}
+    })
+    socket.on('maintain-building',(data:{roomCode:string;buildingId:string;action:string},callback:(result:any)=>void)=>{
+      const room=rooms.get(data.roomCode),player=room?.players.find(p=>p.id===socket.id),building=room?.buildings.find(b=>b.id===data.buildingId)
+      if(!room||room.phase!=='mission'||!player||player.downed||!building||distance(player.x,player.y,building.x,building.y)>220){callback({success:false,message:'Move within 11 metres of an active structure.'});return}
+      const problem=maintainBuilding(building,room.economy,data.action)
+      if(problem){callback({success:false,message:problem});return}
+      callback({success:true});io.to(room.code).emit('building-state',room.buildings);io.to(room.code).emit('resource-state',{economy:room.economy,nodes:room.resourceNodes})
+    })
+    socket.on('reload-weapon',(code:string)=>{
+      const room=rooms.get(code),player=room?.players.find(p=>p.id===socket.id)
+      if(!room||room.phase!=='mission'||!player||player.downed)return
+      if(beginReload(player,Date.now()))io.to(player.id).emit('weapon-state',{ammo:player.ammo,reloadUntil:player.reloadUntil})
+    })
     socket.on('choose-talent',(data:{roomCode:string;talent:string},callback:(response:any)=>void)=>{
       const room=rooms.get(data.roomCode),player=room?.players.find(p=>p.id===socket.id)
       if(!room||room.phase!=='mission'||!player||!player.characterClass||(player.rank??1)<2||player.talent){callback({success:false,message:'Reach rank two and choose one path per campaign.'});return}
@@ -1415,6 +1499,7 @@ io.on(
       const room = rooms.get(code)
       if (room?.phase !== 'victory' || !room.players.some(p => p.id === socket.id && p.isHost)) return
       chapterTransitions.delete(code)
+      room.doctrine=undefined;room.relicChoice=undefined;room.citadelChoice=undefined
       room.players.forEach(p => { p.xp = 0; p.rank = 1; p.weaponTier = 1; p.talent=undefined })
       startLevel(room, 1)
     })
@@ -1533,6 +1618,12 @@ io.on(
               'Room not found.',
           })
           return
+        }
+        if(room.restoredCampaign&&['mission','victory'].includes(room.phase)){
+          const slot=room.players.find(p=>p.connected===false&&p.id.startsWith('saved-')&&p.name.toLowerCase()===name.toLowerCase())??room.players.find(p=>p.connected===false&&p.id.startsWith('saved-'))
+          if(!slot){callback({success:false,message:'All saved characters are already occupied.'});return}
+          slot.id=socket.id;slot.name=name;slot.connected=true;socket.join(code)
+          callback({success:true,room,resumeToken:issueRecovery(socket,code)});io.to(code).emit('room-updated',room);io.to(code).emit('player-state',room.players);return
         }
         if (
           room.gameStarted
@@ -1863,6 +1954,8 @@ io.on(
         ) {
           return
         }
+        if(!spendRound(player,now)){io.to(player.id).emit('weapon-state',{ammo:player.ammo,reloadUntil:player.reloadUntil});return}
+        io.to(player.id).emit('weapon-state',{ammo:player.ammo,reloadUntil:player.reloadUntil})
         attackCooldowns.set(
           socket.id,
           now,
@@ -2080,8 +2173,9 @@ io.on(
             data.type,
           x,
           y,
-          health: 250,
-          maxHealth: 250,
+          level:1,
+          health:room.doctrine==='bastion'?330:250,
+          maxHealth:room.doctrine==='bastion'?330:250,
         }
         room.buildings.push(
           building,
@@ -2144,15 +2238,7 @@ io.on(
               artifactY,
             ) <= 140
           ) {
-            room.questFlags.artifactRecovered =
-              true
-            io.to(room.code).emit(
-              'story-event',
-              'ANCIENT ARTIFACT RECOVERED',
-            )
-            updateQuestState(
-              room,
-            )
+            ancientDialogue(room,player,'artifact')
             return
           }
         }
@@ -2171,21 +2257,13 @@ io.on(
               coreY,
             ) <= 140
           ) {
-            room.questFlags.citadelCoreActivated =
-              true
-            io.to(room.code).emit(
-              'story-event',
-              'THE CITADEL CORE AWAKENS',
-            )
-            updateQuestState(
-              room,
-            )
+            ancientDialogue(room,player,'citadel')
           }
         }
       },
     )
     socket.on('kyrevant-dialogue-choice',
-      (data: { roomCode: string; site: ChapterSite; choice: string }) => {
+      (data: { roomCode: string; site: string; choice: string }) => {
         if (!data || typeof data.roomCode !== 'string' ||
             typeof data.site !== 'string' || typeof data.choice !== 'string') return
         const room = rooms.get(data.roomCode)
@@ -2345,9 +2423,10 @@ const patrolHomes = new Map<string, { x: number; y: number }>()
 setInterval(() => {
   rooms.forEach(
     (room) => {
+      if(['mission','victory'].includes(room.phase)&&Date.now()-(room.lastCheckpointAt??0)>15000){room.lastCheckpointAt=Date.now();for(const player of room.players)if(player.connected!==false)io.to(player.id).emit('campaign-checkpoint',makeCheckpoint(room,player.id))}
       if (
         room.phase !==
-        'mission' || !room.players.some(player=>player.connected!==false)
+        'mission' || (room.restoredCampaign&&room.players.filter(p=>p.connected!==false).length<2) || !room.players.some(player=>player.connected!==false)
       ) {
         return
       }
@@ -2355,12 +2434,12 @@ setInterval(() => {
         Date.now()
       if (now - (room.lastEconomyAt ?? 0) >= 5000) {
         room.lastEconomyAt = now
-        const extractors = room.buildings.filter(b => b.type === 'Extractor').length
-        const cores = room.buildings.filter(b => b.type === 'PowerCore').length
-        if (extractors || cores) grantResources(room, extractors * 4, cores * 3)
+        const extractors = room.buildings.filter(b => b.type === 'Extractor').reduce((n,b)=>n+(b.level??1),0)
+        const cores = room.buildings.filter(b => b.type === 'PowerCore').reduce((n,b)=>n+(b.level??1),0)
+        if (extractors || cores) grantResources(room, extractors * 4*(room.doctrine==='reclaimer'?2:1), cores * 3*(room.doctrine==='reclaimer'?2:1))
         for (const barracks of room.buildings.filter(b => b.type === 'Barracks')) {
           for (const player of room.players) if (!player.downed && distance(player.x,player.y,barracks.x,barracks.y)<220) {
-            player.health = Math.min(player.maxHealth, player.health + 4)
+            player.health = Math.min(player.maxHealth, player.health + 4*(barracks.level??1))
           }
         }
       }
@@ -2463,6 +2542,7 @@ setInterval(() => {
       // are still alive (the four-player game should not lock anyone out).
       // Cleric abilities can revive them earlier.
       for (const player of room.players) {
+        if(completeReload(player,now))io.to(player.id).emit('weapon-state',{ammo:player.ammo,reloadUntil:0})
         if (!player.downed) {
           if (now - (player.lastDamagedAt ?? 0) > 4500) player.shield = Math.min(player.maxShield, player.shield + 5)
           player.downedAt = undefined
@@ -2508,6 +2588,20 @@ setInterval(() => {
             },
           )
                     if (!target) {
+            return
+          }
+          if(enemy.id.startsWith('l1-defense-')&&room.buildings.length&&best>180){
+            const structure=[...room.buildings].sort((a,b)=>distance(enemy.x,enemy.y,a.x,a.y)-distance(enemy.x,enemy.y,b.x,b.y))[0]
+            const d=distance(enemy.x,enemy.y,structure.x,structure.y),visible=frontierLineClear(enemy.x*.05,frontierHeight(enemy.x*.05,enemy.y*.05)+1.15,enemy.y*.05,structure.x*.05,frontierHeight(structure.x*.05,structure.y*.05)+1.2,structure.y*.05)
+            const dx=(structure.x-enemy.x)/(d||1),dy=(structure.y-enemy.y)/(d||1)
+            enemy.intent='raiding';enemy.facingX=dx;enemy.facingY=dy
+            if(d>170||!visible){const step=enemyTactic(enemy,structure,now,visible);enemy.x=Math.max(30,Math.min(WORLD_WIDTH-30,enemy.x+(d>170?dx*8:step.dx)));enemy.y=Math.max(30,Math.min(WORLD_HEIGHT-30,enemy.y+(d>170?dy*8:step.dy)))}
+            else if(now-enemy.lastAttack>=1100){
+              enemy.lastAttack=now;structure.health=Math.max(0,structure.health-(enemy.type==='Heavy'?23:14))
+              io.to(room.code).emit('structure-attack',{buildingId:structure.id,startX:enemy.x,startY:enemy.y,targetX:structure.x,targetY:structure.y})
+              if(structure.health===0){room.buildings=room.buildings.filter(b=>b.id!==structure.id);io.to(room.code).emit('story-event',`${structure.type.toUpperCase()} DESTROYED · Rebuild your defense line.`)}
+              io.to(room.code).emit('building-state',room.buildings)
+            }
             return
           }
           const homeId = `${room.code}/${room.level}/${enemy.id}`
@@ -2643,12 +2737,12 @@ setInterval(() => {
             ) {
               return
             }
-            if(now-(turret.lastVisualAt??0)>220){turret.lastVisualAt=now;io.to(room.code).emit('turret-attack',{enemyId:turret.id,targetId:target.id,startX:turret.x,startY:turret.y,targetX:target.x,targetY:target.y,damage:5})}
+            if(now-(turret.lastVisualAt??0)>220){turret.lastVisualAt=now;io.to(room.code).emit('turret-attack',{enemyId:turret.id,targetId:target.id,startX:turret.x,startY:turret.y,targetX:target.x,targetY:target.y,damage:5*(turret.level??1)})}
             target.health =
               Math.max(
                 0,
                 target.health -
-                  5,
+                  5*(turret.level??1),
               )
             if (
               target.health ===
@@ -2674,7 +2768,7 @@ setInterval(() => {
   )
 }, 300)
 const distDirectory = path.resolve(process.cwd(), 'dist')
-app.get('/healthz', (_req, res) => res.status(200).json({ ok: true, game: 'KYREVANT', multiplayer: true, build: '2026-11-02.2' }))
+app.get('/healthz', (_req, res) => res.status(200).json({ ok: true, game: 'KYREVANT', multiplayer: true, build: '2026-11-02.3' }))
 if (existsSync(path.join(distDirectory, 'index.html'))) {
   app.use(express.static(distDirectory, { maxAge: 3600000 }))
   app.get('/', (_req, res) => res.sendFile(path.join(distDirectory, 'index.html')))

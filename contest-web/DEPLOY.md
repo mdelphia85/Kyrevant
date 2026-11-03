@@ -32,7 +32,7 @@ The repository also includes a root `render.yaml` blueprint with the same settin
 
 Render's free service sleeps after 15 minutes without incoming traffic; its next visitor may wait about a minute for startup. The game shows connection status and waits for the server before enabling room creation. Active matches send WebSocket traffic.
 
-Rooms and campaign progress are held in server memory. A server restart, redeploy, or free-instance shutdown clears them. Socket.IO transport recovery lasts 45 seconds. Saved-character recovery supports refreshes and disconnects up to ten minutes while the room remains alive. No paid database or subscription is required for a match.
+Active rooms are held in server memory. A server restart, redeploy, or free-instance shutdown clears them. Campaign checkpoints autosave to each connected player's browser every 15 seconds. After a restart, choose Continue saved campaign on the title screen to create a fresh room, then invite a teammate to reclaim another saved character. Download a checkpoint through How to Play for a portable backup; the title screen also imports these JSON files. Keep the original browser/device or a downloaded backup, since there is no account-based cloud save. Socket.IO transport recovery lasts 45 seconds; saved-character recovery supports refreshes and disconnects up to ten minutes while the room remains alive. No paid database or subscription is required.
 
 Sources: https://render.com/docs/free and https://render.com/docs/websocket
 

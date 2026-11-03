@@ -507,3 +507,32 @@
 .class-path{margin:10px 0 16px;padding:12px;background:#132b36;border:1px solid #45616b;border-radius:5px;font:12px/1.5 system-ui}.class-path>small{display:block;color:#99b7c2;margin-top:4px}.class-path p{margin:8px 0}.class-path button{display:block;width:100%;margin:7px 0;padding:9px;text-align:left;border:1px solid #688e9a;background:#1a3c49;color:#e3f5f5;cursor:pointer}.class-path button span{display:block;font-size:11px;color:#b2ccd3;margin-top:3px}.class-path button:disabled{opacity:.55;cursor:default}
 
 .immersive-hud .quest-panel{pointer-events:auto;z-index:26}
+
+.magazine-readout{position:absolute;right:24px;bottom:84px;z-index:25;padding:7px 10px;background:#07131bbd;border:1px solid #80b4cb44;color:#d8edf2;font:600 17px monospace;min-width:90px;text-align:right}.magazine-readout small{display:block;font:8px system-ui;letter-spacing:.1em;margin-top:3px;color:#a9c7cd}.immersive-hud .game-window>button.magazine-readout{top:auto!important;bottom:84px!important;font-size:17px!important;padding:7px 10px!important}.immersive-hud:has(.arrival) .magazine-readout{visibility:hidden}@media(pointer:coarse){.immersive-hud .game-window>button.magazine-readout{bottom:225px!important;right:15px!important;font-size:12px!important}}
+
+.base-management{flex-basis:100%;min-width:220px;max-width:500px;max-height:38vh;overflow:auto;font:11px/1.5 system-ui;color:#c2d6d9}.base-management p{margin:7px 0}.base-structure-row{padding:8px 0;border-top:1px solid #6e97a544}.base-structure-row small{display:block}.base-structure-row button{margin:6px 5px 0 0}.pact-summary{font:10px/1.6 system-ui;color:#cfb67d}.immersive-hud .build-actions{flex-wrap:wrap!important;max-height:70vh;overflow:auto}
+
+.saved-squad-wait{position:absolute;top:130px;left:50%;transform:translateX(-50%);z-index:27;width:min(400px,80%);padding:12px;background:#122a35ed;color:#dfedf2;font:12px/1.5 system-ui;text-align:center;border:1px solid #6a969c}.checkpoint-tools{padding:10px;border:1px solid #61818d66;margin:12px 0}.checkpoint-tools p{font-size:12px}.checkpoint-tools button{min-height:44px}.rules-overlay select{margin:8px;padding:8px;color:#dae9eb;background:#152a35}
+@media(pointer:coarse),(max-width:700px){
+  .immersive-hud .fps-instructions,.immersive-hud .sound-toggle{display:none!important}
+  .immersive-hud .battle-hud{top:12px;width:36vw}
+  .immersive-hud .chapter-status{top:38px!important;left:15px!important;max-width:calc(100% - 145px)!important;text-align:left;font-size:9px!important}
+  .immersive-hud .story-location{top:90px!important;left:15px!important;max-width:calc(100% - 145px)!important}
+  .immersive-hud .journal-toggle{right:12px;top:20px;font-size:8px}
+  .immersive-hud .squad-radar{bottom:235px!important;left:18px!important;width:80px!important}
+  .immersive-hud .squad-radar svg{height:60px!important}
+  .immersive-hud .touch-stick{bottom:95px}
+  .immersive-hud .touch-actions{bottom:85px}
+  .immersive-hud .game-window>button.magazine-readout{bottom:260px!important;right:14px!important;font-size:12px!important}
+  .immersive-hud .game-action-bar{bottom:20px;right:14px;max-width:calc(100% - 28px)}
+  .immersive-hud .build-actions{max-width:calc(100vw - 28px);max-height:55vh}
+  .immersive-hud .world-prompt{bottom:300px;max-width:65%;left:50%;transform:translateX(-50%)}
+}
+@media(max-height:500px) and (max-width:950px){
+  .immersive-hud .touch-stick{bottom:25px}
+  .immersive-hud .touch-actions{bottom:60px!important}
+  .immersive-hud .squad-radar{bottom:150px!important;width:70px!important}
+  .immersive-hud .squad-radar svg{height:50px!important}
+  .immersive-hud .game-window>button.magazine-readout{bottom:170px!important}
+  .immersive-hud .game-action-bar{bottom:8px}
+}

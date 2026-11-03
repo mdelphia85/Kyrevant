@@ -16,7 +16,8 @@
     "test:input": "node --import tsx scripts/input-test.mjs",
     "test:terrain": "node --import tsx scripts/terrain-test.mjs",
     "test:recovery": "node scripts/test-local.mjs --recovery",
-    "test:combat": "node --import tsx scripts/combat-feel-test.mjs"
+    "test:combat": "node --import tsx scripts/combat-feel-test.mjs",
+    "test:expansion": "node --import tsx scripts/expansion-test.mjs"
   },
   "dependencies": {
     "@babylonjs/core": "^9.29.0",

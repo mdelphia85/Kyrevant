@@ -1,3 +1,5 @@
+import {upgradeCost} from '../baseStrategy'
+import {weaponSpec} from '../weapons'
 import {CLASS_PATHS,chosenPath} from '../progression'
 import {placementProblem} from '../buildRules'
 import {WeaponMotion} from './WeaponMotion'
@@ -214,6 +216,8 @@ type Player = {
   species?: string
   xp?: number
   rank?: number
+  ammo?:number
+  reloadUntil?:number
   talent?: string
   maxHealth?: number
   shield?: number
@@ -245,6 +249,7 @@ type ResourceNode = {
   remaining: number
 }
 type Building = {
+  level?:number
   id: string
   type: BuildingType
   x: number
@@ -272,6 +277,10 @@ type Room = {
   quests?: QuestObjective[]
   economy?: Economy
   level?: number
+  restoredCampaign?:boolean
+  doctrine?:'bastion'|'reclaimer'
+  relicChoice?:'disable'|'study'
+  citadelChoice?:'shutdown'|'restore'
 }
 type DialogueOption = { id: string; label: string }
 type GameDialogue = { site: string; speaker: string; title: string; lines: string[]; choices: DialogueOption[] }
@@ -421,14 +430,16 @@ function GameCanvas({
     commandMode,
     setCommandMode,
   ] = useState(false)
+  const [graphics,setGraphics]=useState(()=>localStorage.getItem('kyrevant-graphics')??(window.matchMedia('(pointer:coarse)').matches?'performance':'balanced'))
   const [soundEnabled,setSoundEnabled] = useState(true)
   const soundRef = useRef<CombatAudio | null>(null)
   useEffect(() => { if(soundRef.current) soundRef.current.enabled=soundEnabled },[soundEnabled])
+  useEffect(()=>{let lock:WakeLockSentinel|undefined;const acquire=()=>{if(document.visibilityState==='visible'&&'wakeLock' in navigator&&!lock)void navigator.wakeLock.request('screen').then(value=>{lock=value;value.addEventListener('release',()=>{lock=undefined})}).catch(()=>{})};window.addEventListener('pointerdown',acquire);return()=>{window.removeEventListener('pointerdown',acquire);void lock?.release()}},[])
   const [hitAt, setHitAt] = useState(0)
   const [hurtAt,setHurtAt]=useState(0)
   const [aiming,setAiming]=useState(false)
   const [placementStatus,setPlacementStatus]=useState('Move the preview to choose a location.')
-  const [showArrival, setShowArrival] = useState(()=>sessionStorage.getItem(`kyrevant-intro-${room.code}`)!=='seen'&&(room.level??1)===1&&room.phase!=='victory')
+  const [showArrival, setShowArrival] = useState(()=>sessionStorage.getItem(`kyrevant-intro-${room.code}`)!=='seen'&&(room.level??1)===1&&room.phase!=='victory'&&!room.restoredCampaign)
   const [showBuildMenu, setShowBuildMenu] = useState(false)
   const combatPaused = useRef(true)
   const [showFullQuestLog, setShowFullQuestLog] = useState(false)
@@ -438,6 +449,12 @@ function GameCanvas({
   const [progressMessage, setProgressMessage] = useState('')
   const [talentBusy,setTalentBusy]=useState(false)
   const [talentMessage,setTalentMessage]=useState('')
+  const [baseBuildings,setBaseBuildings]=useState<Building[]>(room.buildings??[])
+  const [checkpointMessage,setCheckpointMessage]=useState('Autosaves every 15 seconds on this device. Download a backup to keep it elsewhere.')
+  const [maintenanceMessage,setMaintenanceMessage]=useState('')
+  const [decisions,setDecisions]=useState({doctrine:room.doctrine,relicChoice:room.relicChoice,citadelChoice:room.citadelChoice})
+  useEffect(()=>{const receive=(value:typeof decisions)=>setDecisions(value);socket.on('campaign-decisions',receive);return()=>{socket.off('campaign-decisions',receive)}},[socket])
+  const [magazine,setMagazine]=useState({ammo:0,reloadUntil:0})
   useEffect(()=>{if(!progressMessage)return;const timer=window.setTimeout(()=>setProgressMessage(''),6500);return()=>window.clearTimeout(timer)},[progressMessage])
   const [showRules, setShowRules] = useState(false)
   useEffect(() => { combatPaused.current = showArrival || dialogue !== null || showRules }, [showArrival, dialogue, showRules])
@@ -826,7 +843,12 @@ const glow =
     renderPipeline.imageProcessing.contrast = 1.10
     renderPipeline.imageProcessing.exposure = 1.0
 
+    const applyQuality=(value:string)=>{const low=value==='performance';engine.setHardwareScalingLevel(low?Math.max(1.4,window.devicePixelRatio||1):1);renderPipeline.bloomEnabled=!low;renderPipeline.fxaaEnabled=!low;scene.particlesEnabled=!low}
+    applyQuality(localStorage.getItem('kyrevant-graphics')??(window.matchMedia('(pointer:coarse)').matches?'performance':'balanced'))
+    const onQuality=(event:Event)=>applyQuality((event as CustomEvent<string>).detail)
+    window.addEventListener('kyrevant-graphics',onQuality)
     const weaponMotion=new WeaponMotion()
+    const enemyTargets=new Map<string,{position:Vector3;yaw:number}>()
     const defeatedAt=new Map<string,number>()
     const hitReactions=new Map<string,number>()
     let flashTime = 0
@@ -922,6 +944,12 @@ const glow =
 
     let triggerHeld = false
     let lastLocalShot = 0
+    let localMagazine={ammo:currentPlayers.find(p=>p.id===localId)?.ammo??weaponSpec(currentPlayers.find(p=>p.id===localId)?.characterClass??null).magazine,reloadUntil:currentPlayers.find(p=>p.id===localId)?.reloadUntil??0}
+    setMagazine(localMagazine)
+    const updateMagazine=(value:{ammo:number;reloadUntil:number})=>{if(value.reloadUntil>localMagazine.reloadUntil)audio.play('reload');localMagazine=value;setMagazine(value)}
+    socket.on('weapon-state',updateMagazine)
+    const onStructureAttack=(shot:{startX:number;startY:number;targetX:number;targetY:number})=>{muzzleFlash(new Vector3(sx(shot.startX),frontierHeight(sx(shot.startX),sz(shot.startY))+1.2,sz(shot.startY)),true);setMaintenanceMessage('BASE UNDER ATTACK · Defend or repair your structures.')}
+    socket.on('structure-attack',onStructureAttack)
     const releaseTrigger = (event?:MouseEvent|Event) => { if(!event||!(event instanceof MouseEvent)||event.button===0)triggerHeld=false;if(!event||!(event instanceof MouseEvent)||event.button===2){weaponMotion.release();setAiming(false)} }
     const captureMouse = (event: MouseEvent) => {
       if (combatPaused.current) return
@@ -1449,9 +1477,12 @@ const glow =
       if (combatPaused.current || !socket.connected || commandModeRef.current) return
       const shooter=currentPlayers.find(p=>p.id===localId);if(!shooter||shooter.downed)return
       const role=shooter.characterClass
+      if(localMagazine.reloadUntil>Date.now())return
+      if(localMagazine.ammo<=0){socket.emit('reload-weapon',room.code);return}
       const cadence = role === 'Monk' ? 200 : role === 'Cleric' ? 360 : role === 'Wizard' ? 600 : 250
       if (performance.now() - lastLocalShot < cadence) return
       lastLocalShot = performance.now()
+      localMagazine={...localMagazine,ammo:localMagazine.ammo-1};setMagazine(localMagazine)
       audio.play('shot',role??'Fighter')
       if (
         commandModeRef.current
@@ -1553,7 +1584,7 @@ const glow =
     function keyDown(
       event: KeyboardEvent,
     ) {
-      if (combatPaused.current || event.ctrlKey || event.altKey || event.metaKey) return
+      if (combatPaused.current || event.ctrlKey || event.altKey || event.metaKey || (event.target as HTMLElement)?.closest?.('button,input,textarea,select')) return
       if (!commandModeRef.current &&
         ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space'].includes(event.code)) {
         event.preventDefault()
@@ -1583,6 +1614,9 @@ const glow =
             event.preventDefault()
             fire()
           }
+          break
+        case 'KeyR':
+          if(!event.repeat)socket.emit('reload-weapon',room.code)
           break
         case 'KeyQ':
           abilityRef.current?.()
@@ -1631,6 +1665,7 @@ const glow =
     document.addEventListener('keydown', markKeyboardActivity, true)
     // Clear held keys when the browser loses focus; avoids stuck movement.
     const clearMovementKeys = () => {
+      inputState.clear()
       keys.w = false
       keys.a = false
       keys.s = false
@@ -1638,14 +1673,18 @@ const glow =
       keys.space = false
     }
     window.addEventListener('blur', clearMovementKeys)
+    const onVisibility=()=>{clearMovementKeys();releaseTrigger();if(document.visibilityState==='visible'){if(socket.connected)socket.emit('request-room-state');else socket.connect()}}
+    document.addEventListener('visibilitychange',onVisibility)
     const handleTouch = (event: Event) => {
       const detail = (event as CustomEvent).detail
       if (combatPaused.current || commandModeRef.current) return
+      if(typeof detail.moveX==='number'&&typeof detail.moveZ==='number'){inputState.touchX=detail.moveX;inputState.touchZ=detail.moveZ}
       if (typeof detail.lookX === 'number') applyLookDelta(detail.lookX * 1.8, detail.lookY * 1.8)
       if(detail.action==='aim'){weaponMotion.aimed=!weaponMotion.aimed;setAiming(weaponMotion.aimed)}
       if (detail.key === 'fire') { triggerHeld = detail.down; if (detail.down) fire() }
       if (['w','a','s','d'].includes(detail.key)) keys[detail.key as 'w'|'a'|'s'|'d'] = Boolean(detail.down)
       if (detail.action === 'interact') interactRef.current?.()
+      if (detail.action === 'reload')socket.emit('reload-weapon',room.code)
       if (detail.action === 'ability') abilityRef.current?.()
       if (detail.action === 'mine') mineRef.current?.()
     }
@@ -1948,25 +1987,18 @@ const glow =
           }
           const oldPosition =
             visual.root.position.clone()
-          visual.root.position.set(
-            sx(enemy.x),
-            frontierHeight(sx(enemy.x),sz(enemy.y)),
-            sz(enemy.y),
-          )
+          const nextPosition=new Vector3(sx(enemy.x),frontierHeight(sx(enemy.x),sz(enemy.y)),sz(enemy.y))
+          if(!enemyTargets.has(enemy.id)||Vector3.DistanceSquared(visual.root.position,nextPosition)>100)visual.root.position.copyFrom(nextPosition)
+          const fx=enemy.facingX??(nextPosition.x-oldPosition.x),fz=enemy.facingY??(nextPosition.z-oldPosition.z)
+          enemyTargets.set(enemy.id,{position:nextPosition,yaw:Math.hypot(fx,fz)>.005?Math.atan2(fx,fz)+Math.PI:visual.root.rotation.y})
           /*
             Point moving enemies in the
             direction they are travelling.
           */
           const movement =
-            visual.root.position
-              .subtract(
-                oldPosition,
-              )
+            nextPosition.subtract(oldPosition)
           setMarineMoving(enemy.id, enemy.alive&&Math.hypot(movement.x,movement.z)>0.002)
-          if(enemy.alive){
-            const fx=enemy.facingX??movement.x,fz=enemy.facingY??movement.z
-            if(Math.hypot(fx,fz)>.005)visual.root.rotation.y=Math.atan2(fx,fz)+Math.PI
-          }
+
           visual.root.setEnabled(enemy.alive||performance.now()-(defeatedAt.get(enemy.id)??-Infinity)<650)
         },
       )
@@ -2015,6 +2047,9 @@ const glow =
     ) {
       currentBuildings =
         [...updated]
+      setBaseBuildings(updated)
+      for(const [id,visual] of buildingVisuals)if(!updated.some(b=>b.id===id)){visual.dispose();buildingVisuals.delete(id)}
+      for(const building of updated){const visual=buildingVisuals.get(building.id);if(visual){visual.scaling.setAll(1+((building.level??1)-1)*.05);visual.getChildMeshes().forEach(mesh=>{mesh.visibility=building.health/building.maxHealth<.3?.75:1})}}
       updated.forEach(
         (building) => {
           void createBuilding(
@@ -2177,7 +2212,7 @@ const glow =
           energy: 0,
         },
       )
-      currentEconomy={...(nextRoom.economy??{minerals:0,energy:0})};defeatedAt.clear();hitReactions.clear();exitCommandMode()
+      setBaseBuildings(nextRoom.buildings??[]);setDecisions({doctrine:nextRoom.doctrine,relicChoice:nextRoom.relicChoice,citadelChoice:nextRoom.citadelChoice});currentEconomy={...(nextRoom.economy??{minerals:0,energy:0})};defeatedAt.clear();hitReactions.clear();enemyTargets.clear();const self=currentPlayers.find(p=>p.id===localId);if(self)updateMagazine({ammo:self.ammo??weaponSpec(self.characterClass).magazine,reloadUntil:self.reloadUntil??0});exitCommandMode()
       currentPlayers =
         [...nextRoom.players]
       currentEnemies =
@@ -2345,7 +2380,9 @@ const glow =
           if(!combatPaused.current){arrivalSurface=false;arrivalLookTarget=null;fpsWeapon.setEnabled(true)}
           else if(arrivalLookTarget){const delta=arrivalLookTarget.subtract(fpsCamera.position),yaw=Math.atan2(delta.x,delta.z),pitch=-Math.atan2(delta.y,Math.hypot(delta.x,delta.z)),blend=1-Math.exp(-engine.getDeltaTime()*.0018);inputState.heading+=Math.atan2(Math.sin(yaw-inputState.heading),Math.cos(yaw-inputState.heading))*blend;inputState.pitch+=(pitch-inputState.pitch)*blend;fpsCamera.rotation.set(inputState.pitch,inputState.heading,0)}
         }
-        const motion=weaponMotion.update(engine.getDeltaTime()/1000,Boolean(inputState.keys.w||inputState.keys.a||inputState.keys.s||inputState.keys.d))
+        const reloadProgress=localMagazine.reloadUntil>Date.now()?1-(localMagazine.reloadUntil-Date.now())/weaponSpec(currentPlayers.find(p=>p.id===localId)?.characterClass??null).reloadMs:0
+        const motion=weaponMotion.update(engine.getDeltaTime()/1000,Boolean(inputState.keys.w||inputState.keys.a||inputState.keys.s||inputState.keys.d),reloadProgress)
+        for(const [id,target] of enemyTargets){const visual=enemyVisuals.get(id);if(!visual||defeatedAt.has(id))continue;const blend=1-Math.exp(-Math.min(100,engine.getDeltaTime())*.014);Vector3.LerpToRef(visual.root.position,target.position,blend,visual.root.position);visual.root.rotation.y+=Math.atan2(Math.sin(target.yaw-visual.root.rotation.y),Math.cos(target.yaw-visual.root.rotation.y))*blend;visual.root.rotation.x=hitReactions.has(id)?Math.sin(Math.min(1,(performance.now()-hitReactions.get(id)!)/180)*Math.PI)*-.12:0}
         fpsWeapon.position.set(motion.x,motion.y,motion.z);fpsWeapon.rotation.x=motion.pitch;fpsWeapon.rotation.z=motion.roll;fpsCamera.fov=motion.fov
         for(const [id,time] of defeatedAt){const visual=enemyVisuals.get(id);if(!visual)continue;const t=Math.min(1,(performance.now()-time)/600);visual.root.rotation.z=t*Math.PI*.48;visual.root.position.y=frontierHeight(visual.root.position.x,visual.root.position.z)-t*.22;if(t===1)visual.root.setEnabled(false)}
         for(const [id,time] of hitReactions){const visual=enemyVisuals.get(id);if(visual){const intensity=Math.max(0,1-(performance.now()-time)/150);for(const mesh of visual.root.getChildMeshes())if(mesh.material instanceof PBRMaterial&&mesh.material.name.startsWith('occupation-uniform-'))mesh.material.emissiveColor.set(intensity*.18,intensity*.055,intensity*.015)}if(performance.now()-time>150)hitReactions.delete(id)}
@@ -2547,11 +2584,14 @@ const glow =
       window.removeEventListener('kyrevant-touch', handleTouch)
       window.removeEventListener('blur', releaseTrigger)
       canvas.removeEventListener('contextmenu',preventContext)
+      window.removeEventListener('kyrevant-graphics',onQuality)
+      socket.off('weapon-state',updateMagazine);socket.off('structure-attack',onStructureAttack)
       canvas.removeEventListener('mousedown', captureMouse)
       canvas.removeEventListener('click', resumeMouseLook)
       window.removeEventListener(lookMoveEvent, handleMouseMove)
       window.removeEventListener('keydown', releaseCursor)
       window.removeEventListener('blur', clearMovementKeys)
+      document.removeEventListener('visibilitychange',onVisibility)
       document.removeEventListener('pointerlockchange', handlePointerLockChange)
       document.removeEventListener('pointerlockerror', handlePointerLockError)
       if (document.pointerLockElement === canvas) {
@@ -2765,8 +2805,10 @@ const glow =
         </div>
       </header>
       <div className="game-window">
-        {!showArrival && !dialogue && !commandMode && !victory && <TouchControls aiming={aiming}/>}
+        {!showArrival && !dialogue && !commandMode && !victory && !showRules && !showBuildMenu && <TouchControls aiming={aiming}/>}
         {!showArrival && (equipmentStatus!=='ready' || marineAssetStatus!=='ready') && <div className="equipment-status" role="status">{equipmentStatus==='loading'||marineAssetStatus==='loading'?'Preparing squad equipment…':'Equipment could not load. Reload to retry.'}</div>}
+        {room.restoredCampaign&&players.filter(p=>p.connected!==false).length<2&&<div className="saved-squad-wait" role="status">CAMPAIGN RESTORED · Waiting for a teammate. Share room {room.code}.</div>}
+        {!commandMode&&<button type="button" className="magazine-readout" onClick={()=>socket.emit('reload-weapon',room.code)} aria-label="Reload weapon">{magazine.reloadUntil>0?'RELOADING':`${magazine.ammo} / ${weaponSpec(localPlayer?.characterClass??null).magazine}`}<small>R · RELOAD</small></button>}
         {!commandMode&&hurtAt>0&&<div key={hurtAt} className="combat-damage-vignette" aria-hidden="true"/>}
         {!commandMode && hitAt > 0 && <div key={hitAt} className="combat-hit-marker" aria-hidden="true">×</div>}
         <canvas
@@ -2890,8 +2932,13 @@ const glow =
           <h2 style={{margin:'0 0 10px'}}>KYREVANT · CO-OP RULES</h2>
           <p>Two to four players join the same five-character room code from separate devices. The host starts once both players join; everyone selects a class and presses READY.</p>
           <p><b>Objective:</b> Work together to read the plea near the wreck, find Elias, defeat patrols, talk to settlers, rescue captives, mine minerals, build defenses, survive three waves and defeat the commander.</p>
-          <p><b>Controls:</b> WASD move · Mouse look · Hold right click / Z toggle focus aim · Hold left click / SPACE fire · E talk/interact · M mine · Q special ability · ESC release cursor. Build in Command Mode.</p>
+          <p><b>Controls:</b> WASD move · Mouse look · Hold right click / Z toggle focus aim · Hold left click / SPACE fire · E talk/interact · M mine · Q special ability · R reload · ESC release cursor. Build in Command Mode.</p>
           <p><b>Win:</b> Complete all the mission objectives. Shared resources and buildings belong to your squad; both players share the victory.</p>
+          <section className="checkpoint-tools"><p>{checkpointMessage}</p><button type="button" onClick={()=>socket.timeout(10000).emit('save-campaign',room.code,(error:Error|null,result:{success:boolean;message?:string;checkpoint?:unknown})=>{
+            if(error||!result?.success||!result.checkpoint){setCheckpointMessage(result?.message??'Could not save. Reconnect and try again.');return}
+            window.dispatchEvent(new CustomEvent('kyrevant-local-checkpoint',{detail:result.checkpoint}));const url=URL.createObjectURL(new Blob([JSON.stringify(result.checkpoint,null,2)],{type:'application/json'})),link=document.createElement('a');link.href=url;link.download=`Kyrevant-Chapter-${level}.json`;link.click();window.setTimeout(()=>URL.revokeObjectURL(url),1000);setCheckpointMessage('Checkpoint saved and downloaded. Restore it from the title screen after a restart.')
+          })}>Download campaign checkpoint</button></section>
+          <label>Graphics <select aria-label="Graphics quality" value={graphics} onChange={event=>{setGraphics(event.target.value);localStorage.setItem('kyrevant-graphics',event.target.value);window.dispatchEvent(new CustomEvent('kyrevant-graphics',{detail:event.target.value}))}}><option value="balanced">Balanced</option><option value="performance">Performance · phones</option></select></label>
           <p><a href="/credits.html" target="_blank" rel="noreferrer" style={{color:'#9ccad5'}}>Art and asset credits</a></p><button type="button" onClick={() => setShowRules(false)}>RETURN TO GAME</button> {onLeave&&<button type="button" onClick={onLeave}>LEAVE SQUAD</button>}
           <p style={{fontSize:12,color:'#a1bac5'}}>Refresh or briefly reconnect to return to this character. Disconnected slots are held for ten minutes. Leaving the squad releases your character.</p>
         </div>}
@@ -2928,6 +2975,7 @@ const glow =
               {showFullQuestLog ? 'COLLAPSE' : 'ALL'}
             </button>
           </h3>
+          {decisions.doctrine&&<p className="pact-summary">{decisions.doctrine==='bastion'?'BASTION PACT · +80 structure hull':'RECLAIMER PACT · Double passive resources'}</p>}
           <section className="class-path" aria-label="Character progression">
             <strong>{localPlayer?.species} {localPlayer?.characterClass} · Rank {localPlayer?.rank??1}</strong>
             <small>{localPlayer?.xp??0} / {(localPlayer?.rank??1)*100} XP toward the next rank</small>
@@ -3025,7 +3073,7 @@ const glow =
               VICTORY
             </strong>
             <p>The militia is defeated. The captives are free. Elias lights the refuge beacon for your unit's return.</p>
-            <p>You came here as survivors. You leave as the people who gave Kyrevant a future.</p>
+            <p>{decisions.citadelChoice==='restore'?'Jonah restores the civilian grid. Fields and shelter lights return across Kyrevant; Sera safeguards the ancient machines.':'The militia command channel burns out. Captain Vale dismantles the occupation network while Elias helps the rescued families rebuild.'}</p><p>{decisions.doctrine==='reclaimer'?'Your reclaimed energy keeps the new settlements running.':'The fortifications you raised become the settlements’ first independent defense.'}</p>
             {room.players.find(p => p.id === localId)?.isHost && <button type="button" onClick={() => socket.emit('restart-campaign',room.code)}>Play again</button>}
             <button type="button" onClick={() => onLeave?onLeave():window.location.assign(window.location.pathname)}>Return to title</button>
           </div>
@@ -3132,6 +3180,12 @@ const glow =
               80M / 60E
             </small>
           </button>
+          <section className="base-management" aria-label="Shared base management">
+            <strong>SHARED BASE · {economy.minerals} minerals / {economy.energy} energy</strong>
+            <p>Extractors: minerals · Reactors: energy · Turrets: defense · Barracks: healing. Upgrades multiply output, damage or healing. Assault waves can destroy structures.</p>
+            {baseBuildings.length===0?<p>No structures. Build an extractor to start production.</p>:baseBuildings.map(building=>{const cost=upgradeCost(building.level??1),near=!!localPlayer&&Math.hypot(localPlayer.x-building.x,localPlayer.y-building.y)<=220;return <div className="base-structure-row" key={building.id}><b>{building.type} · Lv {building.level??1}</b><small>{building.health}/{building.maxHealth} hull · {localPlayer?Math.round(Math.hypot(localPlayer.x-building.x,localPlayer.y-building.y)*.05):0}m</small>{(['repair','upgrade'] as const).map(action=><button key={action} disabled={!near||localPlayer?.downed||(action==='upgrade'&&(building.level??1)>=3)} onClick={()=>socket.timeout(10000).emit('maintain-building',{roomCode:room.code,buildingId:building.id,action},(error:Error|null,result:{success:boolean;message?:string})=>setMaintenanceMessage(error?'Connection delayed. Try again.':result?.success?'Order complete.':result?.message??'Order failed.'))}>{action==='repair'?'REPAIR · 25M':`UPGRADE · ${cost.minerals}M ${cost.energy}E`}</button>)}</div>})}
+            {maintenanceMessage&&<p role="status">{maintenanceMessage}</p>}
+          </section>
         </div>}
       </section>
     </div>

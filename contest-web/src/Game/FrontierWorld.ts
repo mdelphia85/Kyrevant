@@ -1,3 +1,4 @@
+import {buildFrontierDetails} from './FrontierDetails'
 import {frontierHeight} from '../world'
 import { Color3, Color4, DynamicTexture, Matrix, Mesh, MeshBuilder, ParticleSystem, PBRMaterial, PointLight, Quaternion, Scene, SceneLoader, ShadowGenerator, StandardMaterial, Texture, TransformNode, Vector3, VertexBuffer, VertexData } from '@babylonjs/core'
 import { armorPanel, beamBetween, fieldMetal } from './FieldGeometry'
@@ -254,6 +255,7 @@ export function buildFrontierWorld(scene:Scene,shadows:ShadowGenerator){
   }
   let rescued=false
   const observer=scene.onBeforeRenderObservable.add(()=>{if(rescued)gate.position.y=Math.max(-3,gate.position.y-scene.getEngine().getDeltaTime()*.002)})
+  buildFrontierDetails(scene,root)
   return {root,confirmUplink(){radioLamp.material=glass},confirmRescue(){rescued=true},beginWave(_wave:number){radioLamp.material=lamp},dispose(){scene.onBeforeRenderObservable.remove(observer);smoke.dispose();root.dispose()}}
 }
 

@@ -1,3 +1,4 @@
+import {readCheckpoint} from './checkpoint'
 import { useEffect, useRef, useState } from 'react'
 import { io } from 'socket.io-client'
 import GameCanvas from './Game/GameCanvas'
@@ -10,19 +11,29 @@ type Room = { code:string; players:Player[]; enemies:Enemy[]; phase:'lobby'|'cla
 type Response = {success:boolean; message?:string; room?:Room; roomCode?:string;resumeToken?:string}
 const endpoint = import.meta.env.VITE_SERVER_URL || (import.meta.env.DEV ? `${window.location.protocol}//${window.location.hostname}:3001` : window.location.origin)
 const socket = io(endpoint, {timeout:20000, reconnection:true, reconnectionDelay:1000, reconnectionDelayMax:5000})
-const CLIENT_BUILD='2026-11-02.2'
+const CLIENT_BUILD='2026-11-02.3'
 
 function Briefing() {
   return <details className="mission-rules"><summary>Mission briefing &amp; how to play</summary>
     <p>Your transport is struck by an asteroid. Stranded on Kyrevant, your unit discovers a plea from citizens captured by the Ashfall militia.</p>
     <ol><li>Gather 2–4 players. Choose a lineage and class, then ready up.</li><li>Read the note near the wreck. Find Elias and rescue the captives.</li><li>Mine resources, build defenses, and protect the settlement through three attacks.</li><li>Follow the militia to the frontier and Citadel. Finish all three chapters to free Kyrevant.</li></ol>
-    <p>WASD move · Mouse aim · Hold left click to fire · Q class ability · E interact · M toggle mining. Choose a structure and click the ground to build; Escape returns to combat.</p>
-    <p>On phones: use the movement pad, drag the right side to aim, and use the action buttons. Tap the ground in construction view to place a structure.</p>
+    <p>WASD move · Mouse aim · Hold left click to fire · Q class ability · R reload · E interact · M toggle mining. Choose a structure and click the ground to build; Escape returns to combat.</p>
+    <p>On phones: use the movement stick, drag the right side to aim, and use the action buttons. Tap the ground in construction view to place a structure.</p>
     <p>Resources and victory are shared. Shields recharge after 4.5 seconds without damage. Downed players redeploy after seven seconds; a fallen squad regroups at the wreck with mission progress retained.</p>
   </details>
 }
 
+type SavedCampaign={level:number;savedAt:string;players:{name:string}[]} & Record<string,unknown>
 export default function App() {
+  const [savedCampaign,setSavedCampaign]=useState<SavedCampaign|null>(()=>{try{const value=JSON.parse(localStorage.getItem('kyrevant-checkpoint')??'null');if(value){readCheckpoint(value);return value}}catch{}return null})
+  const [saveNotice,setSaveNotice]=useState('')
+  useEffect(()=>{
+    const persist=(checkpoint:SavedCampaign)=>{try{readCheckpoint(checkpoint);localStorage.setItem('kyrevant-checkpoint',JSON.stringify(checkpoint));setSavedCampaign(checkpoint);setSaveNotice('Checkpoint saved on this device.')}catch{setSaveNotice('Device storage unavailable. Download a checkpoint from How to Play.')}}
+    const manual=(event:Event)=>persist((event as CustomEvent<SavedCampaign>).detail)
+    socket.on('campaign-checkpoint',persist);window.addEventListener('kyrevant-local-checkpoint',manual)
+    return()=>{socket.off('campaign-checkpoint',persist);window.removeEventListener('kyrevant-local-checkpoint',manual)}
+  },[])
+
   const [updateAvailable,setUpdateAvailable]=useState(false)
   useEffect(()=>{
     const check=()=>{void fetch(`${endpoint}/healthz`,{cache:'no-store'}).then(response=>response.json()).then(data=>setUpdateAvailable(Boolean(data.build&&data.build!==CLIENT_BUILD))).catch(()=>{})}
@@ -116,6 +127,10 @@ export default function App() {
     {status}{updateNotice}<small className="release-build">FRONTIER · BUILD {CLIENT_BUILD}</small>
     {!room ? <><p className="eyebrow">A COOPERATIVE SCI-FI FANTASY CAMPAIGN</p><h1>Survive the fall.<br/>Bring them home.</h1><p className="subtitle">Your unit. An unknown world. A people worth fighting for. Play together from separate devices—no account or download.</p><Briefing/>
       <form onSubmit={event=>{event.preventDefault();enter(false)}}><div className="form-group"><label htmlFor="playerName">Player Name</label><input id="playerName" autoComplete="nickname" value={name} maxLength={20} placeholder="Your callsign" onChange={event=>setName(event.target.value)}/></div><button className="primary-button" disabled={!connected||busy} type="submit">{busy?'Please wait…':'Create Room'}</button></form>
+      <section className="checkpoint-panel" aria-label="Saved campaign">
+        {savedCampaign&&<><h2>Continue your campaign</h2><p>Chapter {savedCampaign.level} · {new Date(savedCampaign.savedAt).toLocaleString()} · {savedCampaign.players[0]?.name}</p><button type="button" disabled={!connected||busy} onClick={()=>request('restore-campaign',{checkpoint:savedCampaign,playerName:name.trim()||savedCampaign.players[0]?.name})}>Continue saved campaign</button><small>Creates a new room code. Friends join it to reclaim the other saved characters. Combat waits for two players.</small></>}
+        <label>Import a downloaded checkpoint<input aria-label="Import campaign checkpoint" type="file" accept=".json,application/json" onChange={async event=>{const file=event.target.files?.[0];if(!file)return;try{if(file.size>100000)throw new Error('Checkpoint file is too large.');const value=JSON.parse(await file.text());readCheckpoint(value);localStorage.setItem('kyrevant-checkpoint',JSON.stringify(value));setSavedCampaign(value);setSaveNotice('Checkpoint imported. Choose Continue saved campaign.')}catch(error){setSaveNotice(error instanceof Error?error.message:'Invalid checkpoint file.')}event.target.value=''}}/></label>{saveNotice&&<p role="status">{saveNotice}</p>}
+      </section>
       <div className="divider"><span>OR JOIN YOUR UNIT</span></div><form onSubmit={event=>{event.preventDefault();enter(true)}}><div className="form-group"><label htmlFor="roomCode">Room Code</label><input id="roomCode" autoCapitalize="characters" autoComplete="off" value={code} maxLength={5} placeholder="Five-character code" onChange={event=>setCode(event.target.value.toUpperCase())}/></div><button type="submit" className="secondary-button" disabled={!connected||busy}>Join Room</button></form>
     </> : room.phase==='class-selection' ? <><h1>Choose your path.</h1><p className="subtitle">Your lineage shapes your armor. Your class shapes your role in the unit.</p><fieldset className="lineage-picker" disabled={current?.ready}><legend>Lineage</legend>{species.map(option=><button type="button" className={lineage===option.name?'lineage selected-class':'lineage'} key={option.name} onClick={()=>{setLineage(option.name);if(current?.characterClass)choose(current.characterClass,option.name)}}><strong>{option.name}</strong><small>{option.description}</small></button>)}</fieldset><div className="class-grid">{characterClasses.map(option=><button key={option.name} className={`class-card ${current?.characterClass===option.name?'selected-class':''}`} disabled={current?.ready} onClick={()=>choose(option.name)}><strong>{option.name}</strong><span>{option.description}</span></button>)}</div>{party}<button className="primary-button" disabled={!connected||busy||!current?.characterClass||current?.ready} onClick={()=>request('set-ready',room.code)}>{current?.ready?'Ready — waiting for the unit':'Lock In Class'}</button></> : <><h1>Assemble your unit.</h1><p className="subtitle">Invite 1–3 friends. Everyone opens the same link and joins with this code.</p><div className="room-code-panel"><span className="room-code-label">ROOM CODE</span><div className="room-code">{room.code}</div><button className="secondary-button" onClick={share}>{copied?'Invite link copied':'Copy invite link'}</button></div>{party}<Briefing/>{current?.isHost?<button className="primary-button" disabled={!connected||busy||room.players.length<2} onClick={()=>request('start-game',room.code)}>{room.players.length<2?'Waiting for a second player':'Begin Battle'}</button>:<p className="subtitle">Waiting for the squad leader to begin.</p>}</>}
     {room&&<button type="button" className="secondary-button" onClick={leave} disabled={!connected||busy}>Leave room</button>}
